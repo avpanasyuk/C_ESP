@@ -1,15 +1,15 @@
 /**
  * @author Sasha
  *
- * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA and async server.
+ * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA and a sync server.
  * @details on both board WiFi modules remember the last configuration by it;self, we will rely on it.
  */
 
 #pragma once
 
 #include <ESP8266WebServer.h>
-#include "C_ESP/board_no_server.h"
-#include "C_General/Error.h"
+#include "../C_ESP/board_no_server.h"
+#include "../C_General/Error.h"
 
 struct ESP_board_sync_server: public ESP_board_no_server {
   ESP8266WebServer server;
