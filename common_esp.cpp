@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "C_ESP\General.h"
 
+static String GET_responce;
+
 namespace avp {
   const String &GenerateHTML(const char *html_body, uint16_t AutoRefresh_s, const char *title) {
     static String out;

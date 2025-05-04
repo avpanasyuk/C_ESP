@@ -1,7 +1,7 @@
 /**
  * @author Sasha
  *
- * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA and async server.
+ * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA and ASYNC server.
  * @details on both board WiFi modules remember the last configuration by it;self, we will rely on it.
  */
 
@@ -29,7 +29,7 @@
 
 #include "../C_General/Error.h"
 
-struct ESP_board: public ESP_board_no_server {
+struct ESP_board_async_server: public ESP_board_no_server {
   AsyncWebServer server;
 
 protected:
@@ -46,7 +46,7 @@ public:
    * @param default_ssid if stored configuration failed to connect try this one
    * @param default_pass if stored configuration failed to connect try this one
    */
-  ESP_board(const char *Name_,
+  ESP_board_async_server(const char *Name_,
     const char *Version_, 
     void (*status_indication_func_)(enum ConnectionStatus_t),
     const String AddUsage = "",
@@ -159,6 +159,6 @@ public:
   void loop() {
     ESP_board_no_server::loop();
   } // loop    
-};   // ESP_board
+};   // ESP_board_async_server
 
 

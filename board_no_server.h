@@ -1,7 +1,7 @@
 /**
  * @author Sasha
  *
- * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA and async server.
+ * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA.
  * @details on both board WiFi modules remember the last configuration by it;self, we will rely on it.
  * @note NOTE!!!!!!!!!!!!!! Should add ArduinoOTA.handle() to main loop !!!!!!!!!!!!!!!!!!!!!!!!
  */
@@ -35,18 +35,17 @@ struct ESP_board_no_server {
   };
 
   static constexpr uint8_t STR_SIZE = 32;  //< ssid and password string sizes
-
+  typedef std::function<void(enum ConnectionStatus_t)> status_indication_func_t;
 protected:
-  void (*status_indication_func)(enum ConnectionStatus_t);
+
+  status_indication_func_t status_indication_func;
 
   IPAddress ip;
   const char *Name;
 
   void post_connection() {
     ip = WiFi.localIP();
-#ifdef DEBUG
-    Serial.printf("Connected in STA mode, IP:%s!\n", (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
-#endif
+    debug_printf("Connected in STA mode, IP:%s!\n", (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
     status_indication_func(CONNECTED);
     WiFi.setAutoConnect(true);
     WiFi.setAutoReconnect(true);
@@ -62,10 +61,10 @@ public:
    * @param default_pass if stored configuration failed to connect try this one
    */
   ESP_board_no_server(const char *Name_,
-    void (*status_indication_func_)(enum ConnectionStatus_t),
-    const char *default_ssid = nullptr,
-    const char *default_pass = nullptr,
-    bool ArduinoOTAmDNS = false) : status_indication_func(status_indication_func_), Name(Name_) {
+    const char *default_ssid,
+    const char *default_pass,
+    status_indication_func_t status_indication_func_ = [](enum ConnectionStatus_t) { }) :
+    Name(Name_), status_indication_func(status_indication_func_) {
     // if AutoConnect is enabled the WIFI library tries to connect to the last WiFi configuration that it remembers
     // on startup
     if(WiFi.getAutoConnect()) {
@@ -73,62 +72,53 @@ public:
       WiFi.waitForConnectResult();
     }
 
-    // trying default WiFI configuration if present
-    if(!WiFi.isConnected() && default_ssid != nullptr && default_pass != nullptr) {
+    if(WiFi.isConnected()) post_connection();
+    else if(default_ssid != nullptr && default_pass != nullptr) { // trying default WiFI configuration if present
       WiFi.mode(WIFI_STA);
-      WiFi.hostname(Name);
+      if(Name != nullptr && Name[0]) WiFi.setHostname(Name); 
       WiFi.begin(default_ssid, default_pass);
       status_indication_func(TRYING_TO_CONNECT);
       WiFi.waitForConnectResult();
-    } else
-      post_connection();
 
-    // if still not connected switching to AP mode
-    if(!WiFi.isConnected()) {
-      WiFi.mode(WIFI_AP);
-      WiFi.softAP(Name, "");
-      ip = WiFi.softAPIP();
-      status_indication_func(AP_MODE);
-#ifdef DEBUG
-      Serial.printf("Connecting in AP mode, IP:%s!\n", (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
-#endif
-    } else
-      post_connection();
+      if(WiFi.isConnected()) post_connection();
+      else {  // if still not connected switching to AP mode. In this mode we got to connect to ESP generated WiFi
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP(Name, "");
+        ip = WiFi.softAPIP();
+        status_indication_func(AP_MODE);
+        debug_printf("Connecting in AP mode, IP:%s!\n", (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
+      }
+    }
 
+    // debug_puts(MDNS.begin(Name) ? "mDNS responder started" : "Error starting mDNS");
+    
 #if DO_OTA
-    // !NOTE Do not forget to put ArduinoOTA.handle() in the loop()
     ArduinoOTA.onStart([]() {
-#ifdef DEBUG
-      Serial.println("Start");
-#endif
+      debug_puts(ArduinoOTA.getCommand() == U_FLASH?"sketch":"fs");
     });
-    ArduinoOTA.onEnd([]() {
-#ifdef DEBUG
-      Serial.println("\nEnd");
-#endif
-    });
+    ArduinoOTA.onEnd([]() { debug_puts("\nEnd"); });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-#ifdef DEBUG
-      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-#endif
+      debug_printf("Progress: %u%%\r", (progress / (total / 100)));
     });
 
     ArduinoOTA.onError([](ota_error_t error) {
-      Serial.printf("Error[%u]: ", error);
-      if(error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-      else if(error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-      else if(error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-      else if(error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-      else if(error == OTA_END_ERROR) Serial.println("End Failed");
+      debug_printf("Error[%u]: ", error);
+      if(error == OTA_AUTH_ERROR) debug_puts("Auth Failed");
+      else if(error == OTA_BEGIN_ERROR) debug_puts("Begin Failed");
+      else if(error == OTA_CONNECT_ERROR) debug_puts("Connect Failed");
+      else if(error == OTA_RECEIVE_ERROR) debug_puts("Receive Failed");
+      else if(error == OTA_END_ERROR) debug_puts("End Failed");
     });
     ArduinoOTA.begin();
 #endif
   }
 
   String getIP() const { return ip.toString(); }
-  void loop() {
+
+  virtual void loop() {
 #if DO_OTA
     ArduinoOTA.handle();
+    yield();
 #endif
   } // loop
 };   // ESP_board

@@ -20,7 +20,7 @@ namespace avp {
     const char *Error;
   protected:
     static constexpr unsigned long DEFAULT_TIMEOUT_MS = 20000;
-    void GetIP() { if(!WiFi.hostByName(server, remote_addr, Timeout_ms)) Error = "Can not resolve name"; }
+    void GetIP() { if(!WiFi.hostByName(server, remote_addr)) Error = "Can not resolve name"; }
   public:
     explicit Client_(WiFiClient &Client_, const char *server_, uint16_t port_, unsigned long Timeout_ms_) :
       Client(Client_), server(server_), port(port_), Timeout_ms(Timeout_ms_), call_back(nullptr),

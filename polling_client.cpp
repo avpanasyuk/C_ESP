@@ -8,10 +8,9 @@ namespace avp {
     if(Error != nullptr) return Error;
     if(call_back_ == nullptr) return Error = "Callback can not be nullptr!";
     if(call_back != nullptr) return Error = "Previous request is pending!";
-    if(!remote_addr.isSet()) {
-      GetIP();
-      return Error = "Could not get the server address!";
-    }
+
+    GetIP();
+    if(Error != nullptr) return Error;
     if(!Client.connect(remote_addr, port)) return Error = "Failed to connect to server!";
     Client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ff\r\nConnection: close\r\n\r\n", Message, server);
 
