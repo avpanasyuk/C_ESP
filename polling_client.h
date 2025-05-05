@@ -14,7 +14,7 @@ namespace avp {
     IPAddress remote_addr;
     const char *server;
     uint16_t port;
-    unsigned long Timeout_ms, EndTimeout_ms;
+    uint32_t Timeout_ms, EndTimeout_ms;
     String GET_response;
     void (*call_back)(const char *);
     const char *Error;
