@@ -1,44 +1,58 @@
 /**
  * @author Sasha
  *
- * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA and a sync server.
+ * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA and a sync server.                    
  * @details on both board WiFi modules remember the last configuration by it;self, we will rely on it.
  */
 
 #pragma once
 
+#include <memory>
 #include <ESP8266WebServer.h>
 #include "../C_ESP/board_no_server.h"
 #include "../C_General/Error.h"
+#include "service.h"
 
 struct ESP_board_sync_server: public ESP_board_no_server {
   ESP8266WebServer server;
+  struct Options_t: public ESP_board_no_server::Options_t {
+    const char *Version;  //< version of the board
+    String AddUsage; //< additional commands in "Usage:" description
+    int LogSize;
+   }; // Options_t
+
+  /**
+   * return default options
+   */
+  static Options_t Default() {
+    return {ESP_board_no_server::Default(),"","",2000};
+  }  // Default
 
 protected:
   const char *Version;
   String WiFi_Around;
+  const std::unique_ptr<avp::Log> pLog; 
 
 public:
   /**
    * @brief initializes esp8266 or esp32 board
    *
-   * @param Name_ c_str name as seen by DNS
-   * @param status_indication_func_ function which will be called by the class when commection status changes
-   * @param AddUsage html code for additional commands in "Usage:" descrition, each line starts with "<li>" and ends with "</li>"
-   * @param default_ssid if stored configuration failed to connect try this one
-   * @param default_pass if stored configuration failed to connect try this one
+   * @param Opts reference to options structure with fields:
+   *     - Name c_str name as seen by DNS  
+   *     - default_ssid if stored configuration failed to connect try this one
+   *     - default_pass if stored configuration failed to connect try this one
+   *     - status_indication_func function which will be called by the class
+   *       when commection status changes
+   *     - Version version of the board
+   *     - AddUsage additional commands in "Usage:" description
+   *     - LogSize size of the log buffer
    */
-  ESP_board_sync_server(const char *Name_,
-    const char *Version_, 
-    void (*status_indication_func_)(enum ConnectionStatus_t),
-    const String AddUsage = "",
-    const char *default_ssid = nullptr,
-    const char *default_pass = nullptr,
-    bool ArduinoOTAmDNS = false) : ESP_board_no_server(Name_, status_indication_func_, default_ssid, default_pass, ArduinoOTAmDNS),
-    server(80), Version(Version_), WiFi_Around(scan())  {
+  ESP_board_sync_server(const Options_t &Opts) : ESP_board_no_server(Opts),
+    server(80), Version(Opts.Version), WiFi_Around(scan()),
+    pLog(std::make_unique<avp::Log>(Opts.LogSize)) { 
     
     // setup Web Server
-    server.on("/", HTTP_GET, [&, AddUsage]() {
+    server.on("/", HTTP_GET, [&, Opts]() {
       String content;
       String ipStr = String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3]);
       // debug_printf(Name);
@@ -51,9 +65,8 @@ public:
         "<li> pin?i=n[&set=(0|1)] - set pin value</li>"
         "<li> pin?i=n[&mode=(0|1)] - set pin mode</li>"
         "<li> config?ssid=<em>string</em>&pass=<em>string</em></li>"
-        "<li> reset - reboots MCU</li>"
-        "<li> update - update firmware page</li>");
-      content += AddUsage;
+        "<li> reset - reboots MCU</li>");
+      content += Opts.AddUsage;
       content += "</ol></p><p><b>WiFi networks:</b></p>";
       content += "<p>";
       content += WiFi_Around;
@@ -135,7 +148,15 @@ public:
     return WiFi_Around;
   }  // scan
 
-  void loop() {
+  void AddToLog(const char *s, bool NoBreak = false) {
+    pLog->Add(s, NoBreak);
+  } // AddToLog
+
+  const char *GetLog() const {
+    return pLog->Get();
+  } // GetLog
+
+  virtual void loop() {
     server.handleClient();
     ESP_board_no_server::loop();
   } // loop
