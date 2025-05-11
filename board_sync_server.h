@@ -9,7 +9,7 @@
 
 #include <memory>
 #include <ESP8266WebServer.h>
-#include "../C_ESP/board_no_server.h"
+#include "board_no_server.h"
 #include "../C_General/Error.h"
 #include "service.h"
 
