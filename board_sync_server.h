@@ -121,7 +121,7 @@ public:
     });
 
     server.on("/log", HTTP_GET, [&]() {
-      server.send(200, "text/html", pLog->Get());
+      server.send(200, "text/html", avp::GenerateHTML(GetLog(),2,"LOG"));
     });
 
     server.on("/reset", HTTP_GET, [&]() {
