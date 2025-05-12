@@ -142,6 +142,6 @@ public:
     ArduinoOTA.handle();
 #endif
     MDNS.update();
-    yield();
+    // yield();
   } // loop
 }; // ESP_board

@@ -65,6 +65,7 @@ public:
         "<li> pin?i=n[&set=(0|1)] - set pin value</li>"
         "<li> pin?i=n[&mode=(0|1)] - set pin mode</li>"
         "<li> config?ssid=<em>string</em>&pass=<em>string</em></li>"
+        "<li> log - outputs debug log</li>"
         "<li> reset - reboots MCU</li>");
       content += Opts.AddUsage;
       content += "</ol></p><p><b>WiFi networks:</b></p>";
@@ -117,6 +118,10 @@ public:
         }
       } else
         server.send(200, "text/plain", "No pin index!");
+    });
+
+    server.on("/log", HTTP_GET, [&]() {
+      server.send(200, "text/html", pLog->Get());
     });
 
     server.on("/reset", HTTP_GET, [&]() {
