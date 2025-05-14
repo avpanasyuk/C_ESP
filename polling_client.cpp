@@ -1,5 +1,5 @@
-#include "C_General\General.hpp"
-#include "C_General\Error.h"
+#include "../C_General/General.hpp"
+#include "../C_General/Error.h"
 #include "polling_client.h"
 
 

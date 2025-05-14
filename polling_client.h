@@ -7,6 +7,7 @@
 #endif
 
 #include <WiFiClientSecure.h>
+#include "../C_General/MyTime.hpp"
 
 namespace avp {
   class Client_ {
@@ -14,7 +15,7 @@ namespace avp {
     IPAddress remote_addr;
     const char *server;
     uint16_t port;
-    uint32_t Timeout_ms, EndTimeout_ms;
+    Time_t Timeout_ms, EndTimeout_ms;
     String GET_response;
     void (*call_back)(const char *);
     const char *Error;
