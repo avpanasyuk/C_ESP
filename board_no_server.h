@@ -58,31 +58,32 @@ struct ESP_board_no_server {
    * return default options
    */
   static Options_t Default() {
-    return {"", "L", "group224", BlinkerFunc};
+    return {"", "L", "group224", BlinkerFunc<>};
   } // Default
 
+  template<int LEDpin = LED_BUILTIN>
   static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
     static int Counter = 0;
     static int LEDstatus = 0;
 
     switch(ConnStatus) {
     case IDLE:
-      if(LEDstatus == 0) digitalWrite(LED_BUILTIN, LEDstatus = 1); // LED off
+      if(LEDstatus == 0) digitalWrite(LEDpin, LEDstatus = 1); // LED off
       break;
     case TRYING_TO_CONNECT:
       if(++Counter > 1) {
         Counter = 0;
-        digitalWrite(LED_BUILTIN, LEDstatus = 1 - LEDstatus); // LED off
+        digitalWrite(LEDpin, LEDstatus = 1 - LEDstatus); // LED off
       }
       break;
     case AP_MODE:
       if(++Counter > 4) {
         Counter = 0;
-        digitalWrite(LED_BUILTIN, LEDstatus = 1 - LEDstatus); // LED off
+        digitalWrite(LEDpin, LEDstatus = 1 - LEDstatus); // LED off
       }
       break;
     case CONNECTED:
-      if(LEDstatus == 1) digitalWrite(LED_BUILTIN, LEDstatus = 0); // LED on
+      if(LEDstatus == 1) digitalWrite(LEDpin, LEDstatus = 0); // LED on
       break;
     } // switch (Stat)
   } // BlinkerFunc
@@ -107,7 +108,7 @@ public:
    */
   ESP_board_no_server(
       const char *Name_, const char *default_ssid, const char *default_pass,
-      status_indication_func_t status_indication_func_ = [](enum ConnectionStatus_t) {})
+      status_indication_func_t status_indication_func_ = BlinkerFunc<>)
       : ConnStatus(IDLE), Name(Name_), status_indication_func(status_indication_func_) {
 
     // SoftTimer should help to control LED blinking furing connection
