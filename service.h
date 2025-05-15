@@ -1,10 +1,13 @@
 #pragma once
 
+#include <Arduino.h>
+#include <Ticker.h>
 #include <WString.h>
 #include <memory>
 #include <stdint.h>
 #include <string.h>
 
+extern Ticker SoftTimer;
 
 namespace avp {
   // ***************** INTERNET CLIENT CONNECTION

@@ -9,6 +9,11 @@
 
 #include <memory>
 #include <ESP8266WebServer.h>
+/**
+ * @note - go to .pio/libdeps/espota/ElegantOTA/library.json and remove "dependencies" section. Then remove
+ * all "async" librarires in .pio/libdeps
+ */
+#include <ElegantOTA.h> // include ElegantOTA library into project
 #include "board_no_server.h"
 #include "../C_General/Error.h"
 #include "service.h"
@@ -66,6 +71,7 @@ public:
         "<li> pin?i=n[&mode=(0|1)] - set pin mode</li>"
         "<li> config?ssid=<em>string</em>&pass=<em>string</em></li>"
         "<li> log - outputs debug log</li>"
+        "<li> update - update firmware</li>"
         "<li> reset - reboots MCU</li>");
       content += Opts.AddUsage;
       content += "</ol></p><p><b>WiFi networks:</b></p>";
@@ -130,7 +136,9 @@ public:
       ESP.restart();
     });
 
-    server.begin();
+    ElegantOTA.begin(&server); // Initialize ElegantOTA with synchronous server
+  
+  server.begin();
   }
 public:
   static const String scan() {
