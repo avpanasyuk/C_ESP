@@ -3,10 +3,10 @@
  *
  * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions,
  * including OTA.
- * @details * WiFi configuration is stored in EEPROM, which is simulated in flash really
- * Module tries to connect to stored WiFi first, and go to AP mode if not successful
- * You can connect to AP WiFi network, go to 192.168.4.1 and set WiFi connection
- * (or control switch).
+ * @details * WiFi configuration is stored in EEPROM, which is simulated in
+ * flash really Module tries to connect to stored WiFi first, and go to AP mode
+ * if not successful You can connect to AP WiFi network, go to 192.168.4.1 and
+ * set WiFi connection (or control switch).
  */
 
 #pragma once
@@ -31,9 +31,15 @@
 #endif
 
 #include "../C_General/Error.h"
+#include "service.h"
 
 struct ESP_board_no_server {
-  static enum ConnectionStatus_t { IDLE, TRYING_TO_CONNECT, AP_MODE, CONNECTED } ConnStatus; // static so it can be reached from an interrupt
+  enum ConnectionStatus_t {
+    IDLE,
+    TRYING_TO_CONNECT,
+    AP_MODE,
+    CONNECTED
+  } ConnStatus; // static so it can be reached from an interrupt
 
   typedef std::function<void(enum ConnectionStatus_t)> status_indication_func_t;
 
@@ -43,22 +49,51 @@ struct ESP_board_no_server {
                                                       // configuration failed
     const char *default_pass;                         //< default password to connect to if stored
                                                       // configuration failed
-    status_indication_func_t status_indication_func_; //< function which will be called by the class
-                                                      // when connection status changes
+    status_indication_func_t status_indication_func_; //< function which will be
+                                                      // called every 100 ms with
+                                                      // connection status
   };
 
   /**
    * return default options
    */
   static Options_t Default() {
-    return {"", "L", "group224", [](enum ConnectionStatus_t s) { ConnStatus = s; }};
+    return {"", "L", "group224", BlinkerFunc};
   } // Default
+
+  static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
+    static int Counter = 0;
+    static int LEDstatus = 0;
+
+    switch(ConnStatus) {
+    case IDLE:
+      if(LEDstatus == 0) digitalWrite(LED_BUILTIN, LEDstatus = 1); // LED off
+      break;
+    case TRYING_TO_CONNECT:
+      if(++Counter > 1) {
+        Counter = 0;
+        digitalWrite(LED_BUILTIN, LEDstatus = 1 - LEDstatus); // LED off
+      }
+      break;
+    case AP_MODE:
+      if(++Counter > 4) {
+        Counter = 0;
+        digitalWrite(LED_BUILTIN, LEDstatus = 1 - LEDstatus); // LED off
+      }
+      break;
+    case CONNECTED:
+      if(LEDstatus == 1) digitalWrite(LED_BUILTIN, LEDstatus = 0); // LED on
+      break;
+    } // switch (Stat)
+  } // BlinkerFunc
 
   static constexpr uint8_t STR_SIZE = 32; //< ssid and password string sizes
 protected:
   IPAddress ip;
   const char *Name;
   status_indication_func_t status_indication_func;
+
+  void Timer100msCallback() { status_indication_func(ConnStatus); } // Timer100msCallback
 
 public:
   /**
@@ -73,11 +108,15 @@ public:
   ESP_board_no_server(
       const char *Name_, const char *default_ssid, const char *default_pass,
       status_indication_func_t status_indication_func_ = [](enum ConnectionStatus_t) {})
-      : Name(Name_), status_indication_func(status_indication_func_) {
+      : ConnStatus(IDLE), Name(Name_), status_indication_func(status_indication_func_) {
+
+    // SoftTimer should help to control LED blinking furing connection
+    SoftTimer.attach_ms(100, [this]() { this->Timer100msCallback(); });
+
     // if AutoConnect is enabled the WIFI library tries to connect to the last
     // WiFi configuration that it remembers on startup
     if(WiFi.getAutoConnect()) {
-      status_indication_func(TRYING_TO_CONNECT);
+      ConnStatus = TRYING_TO_CONNECT;
       WiFi.waitForConnectResult();
     }
 
@@ -86,7 +125,7 @@ public:
       WiFi.mode(WIFI_STA);
       if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
       WiFi.begin(default_ssid, default_pass);
-      status_indication_func(TRYING_TO_CONNECT);
+      ConnStatus = TRYING_TO_CONNECT;
       WiFi.waitForConnectResult();
 
       if(WiFi.isConnected()) post_connection();
@@ -122,8 +161,8 @@ public:
     WiFi.mode(WIFI_AP);
     WiFi.softAP(Name, "");
     ip = WiFi.softAPIP();
-    status_indication_func(AP_MODE);
-    debug_printf("Connecting in AP mode, IP:%s!\n",
+    ConnStatus = AP_MODE;
+    debug_printf("Waiting for connection in AP mode, IP:%s!\n",
                  (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
   } // open_AP
 
@@ -131,13 +170,13 @@ public:
     ip = WiFi.localIP();
     debug_printf("Connected in STA mode, IP:%s!\n",
                  (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
-    status_indication_func(CONNECTED);
+    ConnStatus = CONNECTED;
     WiFi.setAutoConnect(true);
     WiFi.setAutoReconnect(true);
   } // post_connection
 
   void reconnect() {
-    status_indication_func(TRYING_TO_CONNECT);
+    ConnStatus = TRYING_TO_CONNECT;
     WiFi.mode(WIFI_STA);
     WiFi.reconnect();
     WiFi.waitForConnectResult();
