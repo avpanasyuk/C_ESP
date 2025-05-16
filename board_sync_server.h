@@ -62,6 +62,10 @@ public:
       // debug_printf(Name);
       content = String("<!DOCTYPE HTML>\r\n<html>Hello from <b>") + Name + "</b> at IP: " + ipStr +
                 ", MAC: " + WiFi.macAddress() + ", Version: " + Version;
+      char Buffer[19];
+      snprintf(Buffer, sizeof(Buffer), "%02x:%02x:%02x:%02x:%02x:%02x", 
+        BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+      content += "<br>Connected to " + WiFi.SSID() + " (BSSID: " + String(Buffer) + ")<br>";
       content += F("<p><strong>Usage:</strong><br>"
                    "Available URL commands are (like in <b>http://");
       content += String(Name);

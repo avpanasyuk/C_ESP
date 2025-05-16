@@ -94,7 +94,9 @@ struct ESP_board_no_server {
 protected:
   IPAddress ip;
   const char *Name;
+  String ssid, pass;
   status_indication_func_t status_indication_func;
+  uint8_t BSSID[6]; //< BSSID of the best AP
 
   void Timer100msCallback() { status_indication_func(ConnStatus); } // Timer100msCallback
 
@@ -110,7 +112,8 @@ public:
    */
   ESP_board_no_server(const char *Name_, const char *default_ssid, const char *default_pass,
                       status_indication_func_t status_indication_func_ = BlinkerFunc<>)
-      : ConnStatus(IDLE), Name(Name_), status_indication_func(status_indication_func_) {
+      : ConnStatus(IDLE), Name(Name_), ssid(default_ssid), pass(default_pass),
+       status_indication_func(status_indication_func_) {
 
     // SoftTimer should help to control LED blinking furing connection
     SoftTimer.attach_ms(100, [this]() { this->Timer100msCallback(); });
@@ -118,10 +121,7 @@ public:
     WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
     // connect to the one with the best RSSI
 
-    // what credentials to use
-    String ssid = default_ssid, pass = default_pass; // assume defaults
-
-    // but if I have some stored use them
+    // but if I have some stored credentials use them instead of default ones
     LittleFS.begin();
     if(LittleFS.exists(LittleFS_AUTH)) {
       File f = LittleFS.open(LittleFS_AUTH, "r");
@@ -132,10 +132,8 @@ public:
       } else debug_puts("Failed to open stored credentials file!\n");
     } else debug_puts("No stored credentials found!\n");
 
-    if(ssid != "") ConnectToBestAP(ssid.c_str(), pass.c_str());
-
-    if(WiFi.isConnected()) post_connection();
-    else open_AP(); // defaults are not present or do not work, go to AP mode
+    if(ssid == "") open_AP(); 
+    else ConnectToBestAP(ssid.c_str(), pass.c_str());
 
     MDNS.begin(Name);
 
@@ -163,8 +161,9 @@ public:
       : ESP_board_no_server(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_) {}
 
   void ConnectToBestAP(const char *SSID, const char *Pass) {
-    const auto *BSSID = FindBestAP(SSID);
-    if(BSSID != nullptr) {
+    const uint8_t *pBSSID = FindBestAP(SSID);
+     if(pBSSID != nullptr) {
+      memcpy(BSSID, FindBestAP(SSID), sizeof(BSSID)); 
       debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1],
                    BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
       WiFi.mode(WIFI_STA);
@@ -173,6 +172,12 @@ public:
       ConnStatus = TRYING_TO_CONNECT;
       WiFi.waitForConnectResult();
     }
+    if(WiFi.isConnected()) post_connection();
+    else {
+      LittleFS.remove(LittleFS_AUTH); // remove stored credentials
+      debug_puts("Stored credentials removed!\n");
+      open_AP();
+     } // defaults are not present or do not work, go to AP mode
   } // ConnectToBestAP
 
   const uint8_t *FindBestAP(const char *Name) {
@@ -204,17 +209,14 @@ public:
                  (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
     ConnStatus = CONNECTED;
     WiFi.setAutoConnect(false);
-    WiFi.setAutoReconnect(false);
+    WiFi.setAutoReconnect(true);
   } // post_connection
 
   void reconnect() {
-    ConnStatus = TRYING_TO_CONNECT;
-    WiFi.mode(WIFI_STA);
-    WiFi.reconnect();
-    WiFi.waitForConnectResult();
+    ConnectToBestAP(ssid.c_str(), pass.c_str());
     if(WiFi.isConnected()) post_connection();
     else open_AP();
-  } // reconnect
+} // reconnect
 
   String getIP() const { return ip.toString(); }
 
