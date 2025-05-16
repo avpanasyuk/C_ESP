@@ -18,8 +18,13 @@
 #else
 #include <ESPmDNS.h>
 #include <WiFi.h>
-
 #endif
+
+#include <LittleFS.h> // I do not want to use autoConnect, lets store SSID and password
+                      // in LittleFS. you should put board_build.filesystem = littlefs in
+                      // platformio.ini
+                      
+static const char *LittleFS_AUTH = "/net_auth.txt";
 
 #ifndef DO_OTA   // !!!!!!!!!!!! DO NOT FORGET TO CALL ArduinoOTA.handle() from
                  // the loop()
@@ -110,24 +115,27 @@ public:
     // SoftTimer should help to control LED blinking furing connection
     SoftTimer.attach_ms(100, [this]() { this->Timer100msCallback(); });
 
-    // if AutoConnect is enabled the WIFI library tries to connect to the last
-    // WiFi configuration that it remembers on startup
-    if(WiFi.getAutoConnect()) {
-      ConnStatus = TRYING_TO_CONNECT;
-      WiFi.waitForConnectResult();
-    }
+    WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
+    // connect to the one with the best RSSI
+
+    // what credentials to use
+    String ssid = default_ssid, pass = default_pass; // assume defaults
+
+    // but if I have some stored use them
+    LittleFS.begin();
+    if(LittleFS.exists(LittleFS_AUTH)) {
+      File f = LittleFS.open(LittleFS_AUTH, "r");
+      if(f) {
+        ssid = f.readStringUntil('\n');
+        pass = f.readStringUntil('\n');
+        debug_printf("Stored credentials: %s, %s\n", ssid.c_str(), pass.c_str());
+      } else debug_puts("Failed to open stored credentials file!\n");
+    } else debug_puts("No stored credentials found!\n");
+
+    if(ssid != "") ConnectToBestAP(ssid.c_str(), pass.c_str());
 
     if(WiFi.isConnected()) post_connection();
-    else {
-      // if several APs are present, try to connect to the one with the best RSSI
-      // I can not use stored SSID and password here by cliing WiFi.begin(), because
-      // I have to specify BSSID. So, let's try to use defaults
-      if(default_ssid != nullptr && default_pass != nullptr) 
-      ConnectToBestAP(default_ssid, default_pass);
-
-      if(WiFi.isConnected()) post_connection();
-      else open_AP(); // defaults are not present or do not work, go to AP mode
-    }
+    else open_AP(); // defaults are not present or do not work, go to AP mode
 
     MDNS.begin(Name);
 
@@ -173,8 +181,10 @@ public:
     int32_t BestRSSI = INT32_MIN;
 
     for(int i = 0; i < n; ++i) {
-        debug_printf("Found %s, RSSI:%d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
-        if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
+      uint8_t *BSSID = WiFi.BSSID(i);
+      debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i),
+                   BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+      if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
     }
     return BestRSSI_i == -1 ? nullptr : WiFi.BSSID(BestRSSI_i);
   } // FindBestAP
@@ -193,8 +203,8 @@ public:
     debug_printf("Connected in STA mode, IP:%s!\n",
                  (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
     ConnStatus = CONNECTED;
-    WiFi.setAutoConnect(true);
-    WiFi.setAutoReconnect(true);
+    WiFi.setAutoConnect(false);
+    WiFi.setAutoReconnect(false);
   } // post_connection
 
   void reconnect() {
@@ -207,6 +217,17 @@ public:
   } // reconnect
 
   String getIP() const { return ip.toString(); }
+
+  void StoreAUTH(const char *SSID, const char *Pass) {
+    File f = LittleFS.open(LittleFS_AUTH, "w");
+    if(f) {
+      f.print(SSID);
+      f.print('\n');
+      f.print(Pass);
+      f.print('\n');
+      debug_puts("Stored credentials\n");
+    } else debug_puts("Failed to open stored credentials file!\n");
+  } // StoreAUTH
 
   virtual void loop() {
 #if DO_OTA

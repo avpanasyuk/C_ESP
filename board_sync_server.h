@@ -92,7 +92,7 @@ public:
         WiFi.disconnect();
         delay(1000);
         ConnectToBestAP(qsid.c_str(), qpass.c_str());
-        WiFi.setAutoConnect(WiFi.waitForConnectResult() == WL_CONNECTED);
+        if(WiFi.waitForConnectResult() == WL_CONNECTED) StoreAUTH(qsid.c_str(), qpass.c_str());
         delay(1000);
         ESP.restart();
       }
