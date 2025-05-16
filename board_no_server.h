@@ -57,12 +57,9 @@ struct ESP_board_no_server {
   /**
    * return default options
    */
-  static Options_t Default() {
-    return {"", "L", "group224", BlinkerFunc<>};
-  } // Default
+  static Options_t Default() { return {"", "L", "group224", BlinkerFunc<>}; } // Default
 
-  template<int LEDpin = LED_BUILTIN>
-  static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
+  template <int LEDpin = LED_BUILTIN> static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
     static int Counter = 0;
     static int LEDstatus = 0;
 
@@ -106,9 +103,8 @@ public:
    * @param default_ssid if stored configuration failed to connect try this one
    * @param default_pass if stored configuration failed to connect try this one
    */
-  ESP_board_no_server(
-      const char *Name_, const char *default_ssid, const char *default_pass,
-      status_indication_func_t status_indication_func_ = BlinkerFunc<>)
+  ESP_board_no_server(const char *Name_, const char *default_ssid, const char *default_pass,
+                      status_indication_func_t status_indication_func_ = BlinkerFunc<>)
       : ConnStatus(IDLE), Name(Name_), status_indication_func(status_indication_func_) {
 
     // SoftTimer should help to control LED blinking furing connection
@@ -122,15 +118,15 @@ public:
     }
 
     if(WiFi.isConnected()) post_connection();
-    else if(default_ssid != nullptr && default_pass != nullptr) { // trying default WiFI configuration if present
-      WiFi.mode(WIFI_STA);
-      if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
-      WiFi.begin(default_ssid, default_pass);
-      ConnStatus = TRYING_TO_CONNECT;
-      WiFi.waitForConnectResult();
+    else {
+      // if several APs are present, try to connect to the one with the best RSSI
+      // I can not use stored SSID and password here by cliing WiFi.begin(), because
+      // I have to specify BSSID. So, let's try to use defaults
+      if(default_ssid != nullptr && default_pass != nullptr) 
+      ConnectToBestAP(default_ssid, default_pass);
 
       if(WiFi.isConnected()) post_connection();
-      else open_AP();
+      else open_AP(); // defaults are not present or do not work, go to AP mode
     }
 
     MDNS.begin(Name);
@@ -157,6 +153,31 @@ public:
   } // constructor
   ESP_board_no_server(const Options_t &Opts)
       : ESP_board_no_server(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_) {}
+
+  void ConnectToBestAP(const char *SSID, const char *Pass) {
+    const auto *BSSID = FindBestAP(SSID);
+    if(BSSID != nullptr) {
+      debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1],
+                   BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+      WiFi.mode(WIFI_STA);
+      if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
+      WiFi.begin(SSID, Pass, 0, BSSID);
+      ConnStatus = TRYING_TO_CONNECT;
+      WiFi.waitForConnectResult();
+    }
+  } // ConnectToBestAP
+
+  const uint8_t *FindBestAP(const char *Name) {
+    int n = WiFi.scanNetworks(false, false, 0, (uint8_t *)Name);
+    int BestRSSI_i = -1;
+    int32_t BestRSSI = INT32_MIN;
+
+    for(int i = 0; i < n; ++i) {
+        debug_printf("Found %s, RSSI:%d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+        if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
+    }
+    return BestRSSI_i == -1 ? nullptr : WiFi.BSSID(BestRSSI_i);
+  } // FindBestAP
 
   void open_AP() {
     WiFi.mode(WIFI_AP);

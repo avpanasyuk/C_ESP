@@ -19,7 +19,6 @@
 #include "service.h"
 #include <ElegantOTA.h> // include ElegantOTA library into project
 
-
 struct ESP_board_sync_server : public ESP_board_no_server {
   ESP8266WebServer server;
   struct Options_t : public ESP_board_no_server::Options_t {
@@ -77,11 +76,10 @@ public:
                    "<li> reset - reboots MCU</li>");
       content += Opts.AddUsage;
       content += "</ol></p><p><b>WiFi networks:</b></p>";
-      content += "<p>";
-      content += WiFi_Around;
-      content += String(F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' length=")) +
-                 (STR_SIZE - 1) + " value='" + WiFi.SSID() + "'><input name='pass' length=" + (STR_SIZE - 1) +
-                 "><input type='submit'></html>";
+      content += "<p>" + WiFi_Around + "</p>" +
+          "<form method='get' action='/config'><label>SSID: </label><input name='ssid' length=" + (STR_SIZE - 1) +
+          " value='" + WiFi.SSID() + "'><input name='pass' length=" + 
+          (STR_SIZE - 1) + "><input type='submit'></html>";
       server.send(200, "text/html", content);
     });
 
@@ -93,9 +91,7 @@ public:
         delay(1000);
         WiFi.disconnect();
         delay(1000);
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(qsid.c_str(), qpass.c_str());
-        status_indication_func(TRYING_TO_CONNECT);
+        ConnectToBestAP(qsid.c_str(), qpass.c_str());
         WiFi.setAutoConnect(WiFi.waitForConnectResult() == WL_CONNECTED);
         delay(1000);
         ESP.restart();
@@ -139,7 +135,7 @@ public:
 public:
   static const String scan() {
     String WiFi_Around;
-    int n = WiFi.scanNetworks();
+    int n = WiFi.scanNetworks(false,false);
 
     WiFi_Around = "<ol>";
     for(int i = 0; i < n; ++i) {
@@ -154,6 +150,7 @@ public:
       WiFi_Around += "</li>";
     }
     WiFi_Around += "</ol>";
+    WiFi.scanDelete();
     return WiFi_Around;
   } // scan
 
