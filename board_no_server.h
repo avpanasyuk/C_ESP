@@ -64,7 +64,7 @@ struct ESP_board_no_server {
   /**
    * return default options
    */
-  static Options_t Default() { return {"", "L", "group224", BlinkerFunc<>}; } // Default
+  static Options_t Default() { return {NAME, "L", "group224", BlinkerFunc<>}; } // Default
 
   template <int LEDpin = LED_BUILTIN> static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
     static int Counter = 0;
