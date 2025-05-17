@@ -2,25 +2,33 @@
  * @author Sasha
  *
  * @brief class for ESP8266 or ESP32, implements commonly used WiFi functions, including OTA and a sync server.
- * @details on both board WiFi modules remember the last configuration by it;self, we will rely on it.
+ *
  */
 
 #pragma once
 
-#include <ESP8266WebServer.h>
 #include <memory>
+#ifdef ESP8266
+#include <ESP8266WebServer.h>
+using WebServer = ESP8266WebServer;
+#else
+#include <WebServer.h>
+#endif
+#include "../C_General/Error.hpp"
+#include "service.h"
+#include "board_no_server.h"
 
+#ifdef ELEGANT_OTA
 /**
  * @note - go to .pio/libdeps/espota/ElegantOTA/library.json and remove "dependencies" section. Then remove
  * all "async" librarires in .pio/libdeps
  */
-#include "../C_General/Error.h"
-#include "board_no_server.h"
-#include "service.h"
 #include <ElegantOTA.h> // include ElegantOTA library into project
+#endif
 
 struct ESP_board_sync_server : public ESP_board_no_server {
-  ESP8266WebServer server;
+  WebServer server;
+
   struct Options_t : public ESP_board_no_server::Options_t {
     const char *Version; //< version of the board
     String AddUsage;     //< additional commands in "Usage:" description
@@ -62,10 +70,7 @@ public:
       // debug_printf(Name);
       content = String("<!DOCTYPE HTML>\r\n<html>Hello from <b>") + Name + "</b> at IP: " + ipStr +
                 ", MAC: " + WiFi.macAddress() + ", Version: " + Version;
-      char Buffer[19];
-      snprintf(Buffer, sizeof(Buffer), "%02x:%02x:%02x:%02x:%02x:%02x", 
-        BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
-      content += "<br>Connected to " + WiFi.SSID() + " (BSSID: " + String(Buffer) + ")<br>";
+      content += "<br>Connected to " + WiFi.SSID() + " (BSSID: " + BSSIDtoString(BSSID) + ")<br>";
       content += F("<p><strong>Usage:</strong><br>"
                    "Available URL commands are (like in <b>http://");
       content += String(Name);
@@ -80,10 +85,10 @@ public:
                    "<li> reset - reboots MCU</li>");
       content += Opts.AddUsage;
       content += "</ol></p><p><b>WiFi networks:</b></p>";
-      content += "<p>" + WiFi_Around + "</p>" +
+      content +=
+          "<p>" + WiFi_Around + "</p>" +
           "<form method='get' action='/config'><label>SSID: </label><input name='ssid' length=" + (STR_SIZE - 1) +
-          " value='" + WiFi.SSID() + "'><input name='pass' length=" + 
-          (STR_SIZE - 1) + "><input type='submit'></html>";
+          " value='" + WiFi.SSID() + "'><input name='pass' length=" + (STR_SIZE - 1) + "><input type='submit'></html>";
       server.send(200, "text/html", content);
     });
 
@@ -131,29 +136,37 @@ public:
       ESP.restart();
     });
 
+#ifdef ELEGANT_OTA
     ElegantOTA.begin(&server); // Initialize ElegantOTA with synchronous server
-
+#endif
     server.begin();
   }
 
 public:
+  static const String BSSIDtoString(const uint8_t *BSSID) {
+    return avp::String_printf("%02x:%02x:%02x:%02x:%02x:%02x", BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4],
+                              BSSID[5]);
+  } // BSSIDtoString
+
   static const String scan() {
     String WiFi_Around;
-    int n = WiFi.scanNetworks(false,false);
+    int n = WiFi.scanNetworks(false, false);
 
-    WiFi_Around = "<ol>";
+    WiFi_Around = "<table><tr><th>SSID</th><th>RSSI</th><th>Protected</th><th>BSSID</th></tr>";
     for(int i = 0; i < n; ++i) {
       // Print SSID and RSSI for each network found
-      WiFi_Around += "<li>";
+      WiFi_Around += "<tr>";
+      WiFi_Around += "<td>";
       WiFi_Around += WiFi.SSID(i);
-      WiFi_Around += " (";
+      WiFi_Around += "</td><td>";
       WiFi_Around += WiFi.RSSI(i);
-
-      WiFi_Around += ")";
+      WiFi_Around += "</td><td>";
       WiFi_Around += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*";
-      WiFi_Around += "</li>";
+      WiFi_Around += "</td><td>";
+      WiFi_Around += BSSIDtoString(WiFi.BSSID(i));
+      WiFi_Around += "</td></tr>";
     }
-    WiFi_Around += "</ol>";
+    WiFi_Around += "</table>";
     WiFi.scanDelete();
     return WiFi_Around;
   } // scan
@@ -166,4 +179,4 @@ public:
     server.handleClient();
     ESP_board_no_server::loop();
   } // loop
-}; // ESP_board
+}; // ESP_board_sync_server

@@ -1,4 +1,4 @@
-#include <Arduino.h>
+#include "../C_General/General.hpp"
 #include "service.h"
 
 static String GET_responce;
@@ -29,6 +29,17 @@ namespace avp {
     // Serial.println(out);
 #endif
     return out;
-  }  // GenerateHTML
-} // namespace avp
+  } // GenerateHTML
 
+  String String_vprintf(const char *format, va_list ap) {
+    va_list ap_;
+    va_copy(ap_, ap); // turns out vsnprintf is changing ap, so we have to make a reserve copy
+    const int Size = vsnprintf(nullptr, 0, format, ap_);
+    if(Size < 0) return "string_vprintf: format is wrong!";
+    char Buffer[Size + 1]; // +1 to include ending zero byte
+    vsnprintf(Buffer, Size + 1, format, ap);
+    return String(Buffer); 
+  } // string_vprintf
+
+  PRINTF_WRAPPER(String, String_printf, String_vprintf);
+} // namespace avp

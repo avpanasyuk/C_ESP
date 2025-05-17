@@ -10,6 +10,7 @@
  */
 
 #pragma once
+#include <Arduino.h>
 
 #if defined(ESP8266)
 #include <ESP8266WiFi.h> // https://github.com/esp8266/Arduino
@@ -23,7 +24,7 @@
 #include <LittleFS.h> // I do not want to use autoConnect, lets store SSID and password
                       // in LittleFS. you should put board_build.filesystem = littlefs in
                       // platformio.ini
-                      
+
 static const char *LittleFS_AUTH = "/net_auth.txt";
 
 #ifndef DO_OTA   // !!!!!!!!!!!! DO NOT FORGET TO CALL ArduinoOTA.handle() from
@@ -46,7 +47,8 @@ struct ESP_board_no_server {
     CONNECTED
   } ConnStatus; // static so it can be reached from an interrupt
 
-  typedef std::function<void(enum ConnectionStatus_t)> status_indication_func_t;
+  // typedef std::function<void(enum ConnectionStatus_t)> status_indication_func_t;
+  typedef void (*status_indication_func_t)(enum ConnectionStatus_t);
 
   struct Options_t {
     const char *Name;                                 //< name of the device as seen by DNS
@@ -64,7 +66,8 @@ struct ESP_board_no_server {
    */
   static Options_t Default() { return {"", "L", "group224", BlinkerFunc<>}; } // Default
 
-  template <int LEDpin = LED_BUILTIN> static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
+  template <int LEDpin = LED_BUILTIN> 
+  static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
     static int Counter = 0;
     static int LEDstatus = 0;
 
@@ -113,10 +116,10 @@ public:
   ESP_board_no_server(const char *Name_, const char *default_ssid, const char *default_pass,
                       status_indication_func_t status_indication_func_ = BlinkerFunc<>)
       : ConnStatus(IDLE), Name(Name_), ssid(default_ssid), pass(default_pass),
-       status_indication_func(status_indication_func_) {
+        status_indication_func(status_indication_func_) {
 
     // SoftTimer should help to control LED blinking furing connection
-    SoftTimer.attach_ms(100, [this]() { this->Timer100msCallback(); });
+    SoftTimer.attach_ms<ESP_board_no_server *>(100, [](ESP_board_no_server *a) { a->Timer100msCallback(); }, this);
 
     WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
     // connect to the one with the best RSSI
@@ -132,7 +135,7 @@ public:
       } else debug_puts("Failed to open stored credentials file!\n");
     } else debug_puts("No stored credentials found!\n");
 
-    if(ssid == "") open_AP(); 
+    if(ssid == "") open_AP();
     else ConnectToBestAP(ssid.c_str(), pass.c_str());
 
     MDNS.begin(Name);
@@ -162,8 +165,8 @@ public:
 
   void ConnectToBestAP(const char *SSID, const char *Pass) {
     const uint8_t *pBSSID = FindBestAP(SSID);
-     if(pBSSID != nullptr) {
-      memcpy(BSSID, FindBestAP(SSID), sizeof(BSSID)); 
+    if(pBSSID != nullptr) {
+      memcpy(BSSID, FindBestAP(SSID), sizeof(BSSID));
       debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1],
                    BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
       WiFi.mode(WIFI_STA);
@@ -177,11 +180,15 @@ public:
       LittleFS.remove(LittleFS_AUTH); // remove stored credentials
       debug_puts("Stored credentials removed!\n");
       open_AP();
-     } // defaults are not present or do not work, go to AP mode
+    } // defaults are not present or do not work, go to AP mode
   } // ConnectToBestAP
 
   const uint8_t *FindBestAP(const char *Name) {
+#if defined(ESP8266)
     int n = WiFi.scanNetworks(false, false, 0, (uint8_t *)Name);
+#else
+    int n = WiFi.scanNetworks(false, false, false, 300U, 0, Name, nullptr);
+#endif
     int BestRSSI_i = -1;
     int32_t BestRSSI = INT32_MIN;
 
@@ -216,7 +223,7 @@ public:
     ConnectToBestAP(ssid.c_str(), pass.c_str());
     if(WiFi.isConnected()) post_connection();
     else open_AP();
-} // reconnect
+  } // reconnect
 
   String getIP() const { return ip.toString(); }
 
@@ -235,7 +242,9 @@ public:
 #if DO_OTA
     ArduinoOTA.handle();
 #endif
+#if defined(ESP8266)
     MDNS.update();
+#endif
     // yield();
   } // loop
 }; // ESP_board

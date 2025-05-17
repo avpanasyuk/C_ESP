@@ -6,6 +6,8 @@
 #include <memory>
 #include <stdint.h>
 #include <string.h>
+// #include <stdarg.h>
+
 
 extern Ticker SoftTimer;
 
@@ -29,7 +31,7 @@ namespace avp {
 
   public:
     Log(size_t size, const char *Break = "<br>")
-        : Text{std::make_unique<char[]>(size + 1)}, Sz(size), Br(Break), BrL(strlen(Br)) {
+        : Text{std::make_unique<char[]>(size + 1)}, Sz(size), Br(Break), BrL(strlen(Break)) {
       *Text.get() = 0;
     } // constructor
 
@@ -58,4 +60,7 @@ namespace avp {
       }
     } // Add
   }; // class Log
+
+  String String_vprintf(const char *format, va_list ap);
+  String String_printf(const char *format, ...);
 } // namespace avp
