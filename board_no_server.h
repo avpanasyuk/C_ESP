@@ -66,8 +66,7 @@ struct ESP_board_no_server {
    */
   static Options_t Default() { return {"", "L", "group224", BlinkerFunc<>}; } // Default
 
-  template <int LEDpin = LED_BUILTIN> 
-  static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
+  template <int LEDpin = LED_BUILTIN> static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
     static int Counter = 0;
     static int LEDstatus = 0;
 
@@ -118,9 +117,12 @@ public:
       : ConnStatus(IDLE), Name(Name_), ssid(default_ssid), pass(default_pass),
         status_indication_func(status_indication_func_) {
 
-    // SoftTimer should help to control LED blinking furing connection
+// SoftTimer should help to control LED blinking furing connection
+#ifdef ESP8266
+    SoftTimer.attach_ms(100, [this]() { this->Timer100msCallback(); });
+#else
     SoftTimer.attach_ms<ESP_board_no_server *>(100, [](ESP_board_no_server *a) { a->Timer100msCallback(); }, this);
-
+#endif
     WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
     // connect to the one with the best RSSI
 
