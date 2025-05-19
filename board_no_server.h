@@ -36,6 +36,10 @@ static const char *LittleFS_AUTH = "/net_auth.txt";
 #include <ArduinoOTA.h>
 #endif
 
+#ifndef NAME
+#define NAME "DefineNAME"
+#endif
+
 #include "../C_General/Error.h"
 #include "service.h"
 
