@@ -60,7 +60,4 @@ namespace avp {
       }
     } // Add
   }; // class Log
-
-  String String_vprintf(const char *format, va_list ap);
-  String String_printf(const char *format, ...);
 } // namespace avp
