@@ -40,6 +40,7 @@ static const char *LittleFS_AUTH = "/net_auth.txt";
 #define NAME "DefineNAME"
 #endif
 
+#include "../C_General/MyTime.hpp"
 #include "../C_General/Error.h"
 #include "service.h"
 
@@ -222,14 +223,16 @@ public:
                  (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
     ConnStatus = CONNECTED;
     WiFi.setAutoConnect(false);
-    WiFi.setAutoReconnect(true);
+    WiFi.setAutoReconnect(false);
   } // post_connection
 
-  void reconnect() {
-    ConnectToBestAP(ssid.c_str(), pass.c_str());
-    if(WiFi.isConnected()) post_connection();
-    else open_AP();
-  } // reconnect
+  void TryToConnect() {
+    if(!WiFi.isConnected()) {
+      ConnectToBestAP(ssid.c_str(), pass.c_str());
+      if(WiFi.isConnected()) post_connection();
+      else open_AP();
+    }
+  } // TryToConnect
 
   String getIP() const { return ip.toString(); }
 
@@ -245,6 +248,9 @@ public:
   } // StoreAUTH
 
   virtual void loop() {
+    static avp::TimePeriod1<10UL*60*1000, millis> TP;
+    if(TP.Expired()) TryToConnect(); // try to connect every 10 minutes
+
 #if DO_OTA
     ArduinoOTA.handle();
 #endif

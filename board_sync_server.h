@@ -15,6 +15,8 @@ using WebServer = ESP8266WebServer;
 #include <WebServer.h>
 #endif
 #include "../C_General/Error.hpp"
+#include "../C_ARDUINO/General.h"
+
 #include "service.h"
 #include "board_no_server.h"
 
