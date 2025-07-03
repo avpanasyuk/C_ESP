@@ -14,11 +14,11 @@ using WebServer = ESP8266WebServer;
 #else
 #include <WebServer.h>
 #endif
-#include "../C_General/Error.hpp"
 #include "../C_ARDUINO/General.h"
+#include "../C_General/Error.hpp"
 
-#include "service.h"
 #include "board_no_server.h"
+#include "service.h"
 
 #ifdef ELEGANT_OTA
 /**
@@ -46,6 +46,8 @@ protected:
   const char *Version;
   String WiFi_Around;
   const std::unique_ptr<avp::Log> pLog;
+  static constexpr uint32_t ReservedForResponse = 2048;
+  String Response; //< reserve buffer for responses to avoid dynamic memory allocation
 
 public:
   /**
@@ -64,41 +66,57 @@ public:
   ESP_board_sync_server(const Options_t &Opts)
       : ESP_board_no_server(Opts), server(80), Version(Opts.Version), WiFi_Around(scan()),
         pLog(std::make_unique<avp::Log>(Opts.LogSize)) {
+    Response.reserve(ReservedForResponse); // reserve buffer for responses to avoid dynamic memory allocation
+    Name = Opts.Name;
 
     // setup Web Server
-    server.on("/", HTTP_GET, [&, Opts]() {
+    on("/", [&, Opts]() {
       String content;
       String ipStr = String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3]);
       // debug_printf(Name);
-      content = String("<!DOCTYPE HTML>\r\n<html>Hello from <b>") + Name + "</b> at IP: " + ipStr +
-                ", MAC: " + WiFi.macAddress() + ", Version: " + Version;
-      content += "<br>Connected to " + WiFi.SSID() + " (BSSID: " + BSSIDtoString(BSSID) + ")<br>";
-      content += F("<p><strong>Usage:</strong><br>"
-                   "Available URL commands are (like in <b>http://");
-      content += String(Name);
-      content += F("/</b><em>command</em>):<ol>"
-                   "<li> nothing - outputs this screen</li>"
-                   "<li> pin?i=n - return pin n settings</li>"
-                   "<li> pin?i=n[&set=(0|1)] - set pin value</li>"
-                   "<li> pin?i=n[&mode=(0|1)] - set pin mode</li>"
-                   "<li> config?ssid=<em>string</em>&pass=<em>string</em></li>"
-                   "<li> log - outputs debug log</li>"
-                   "<li> update - update firmware</li>"
-                   "<li> reset - reboots MCU</li>");
-      content += Opts.AddUsage;
-      content += "</ol></p><p><b>WiFi networks:</b></p>";
-      content +=
-          "<p>" + WiFi_Around + "</p>" +
-          "<form method='get' action='/config'><label>SSID: </label><input name='ssid' length=" + (STR_SIZE - 1) +
-          " value='" + WiFi.SSID() + "'><input name='pass' length=" + (STR_SIZE - 1) + "><input type='submit'></html>";
-      server.send(200, "text/html", content);
+      Response = String("<!DOCTYPE HTML>\r\n<html>Hello from <b>");
+      AddToRespose(Name);
+      AddToRespose("</b> at IP: ");
+      AddToRespose(ipStr);
+      AddToRespose(", MAC: ");
+      AddToRespose(WiFi.macAddress());
+      AddToRespose(", Version: ");
+      AddToRespose(Version);
+      AddToRespose("<br>Connected to ");
+      AddToRespose(WiFi.SSID());
+      AddToRespose(" (BSSID: ");
+      AddToRespose(BSSIDtoString(BSSID));
+      AddToRespose(F(")<br><p><strong>Usage:</strong><br>"
+                     "Available URL commands are (like in <b>http://"));
+      AddToRespose(Name);
+      AddToRespose(F("/</b><em>command</em>):<ol>"
+                     "<li> nothing - outputs this screen</li>"
+                     "<li> pin?i=n - return pin n settings</li>"
+                     "<li> pin?i=n[&set=(0|1)] - set pin value</li>"
+                     "<li> pin?i=n[&mode=(0|1)] - set pin mode</li>"
+                     "<li> config?ssid=<em>string</em>&pass=<em>string</em></li>"
+                     "<li> log - outputs debug log</li>"
+                     "<li> update - update firmware</li>"
+                     "<li> reset - reboots MCU</li>"));
+      AddToRespose(Opts.AddUsage);
+      AddToRespose(F("</ol></p><p><b>WiFi networks:</b></p>"));
+      AddToRespose("<p>");
+      AddToRespose(WiFi_Around);
+      AddToRespose(F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' length="));
+      AddToRespose(STR_SIZE - 1);
+      AddToRespose(" value='");
+      AddToRespose(WiFi.SSID());
+      AddToRespose("'><input name='pass' length=");
+      AddToRespose(STR_SIZE - 1);
+      AddToRespose("><input type='submit'></html>");
+      send("text/html");
     });
 
-    server.on("/config", HTTP_GET, [&]() { // URL xxx.xxx.xxx.xxx/set?pin=14&value=1
+    on("/config", [&]() { // URL xxx.xxx.xxx.xxx/set?pin=14&value=1
       String qsid = server.arg("ssid");
       String qpass = server.arg("pass");
       if(qsid.length() > 0 && qpass.length() > 0) {
-        server.send(200, "text/plain", "WiFI configuration changed, connection is being reistablished!");
+        send("text/plain", "WiFI configuration changed, connection is being reistablished!");
         delay(1000);
         WiFi.disconnect();
         delay(1000);
@@ -109,31 +127,31 @@ public:
       }
     });
 
-    server.on("/pin", HTTP_GET, [&]() { // URL xxx.xxx.xxx.xxx/pin?i=n[&analog][&set=x][&mode=x]
+    on("/pin", [&]() { // URL xxx.xxx.xxx.xxx/pin?i=n[&analog][&set=x][&mode=x]
       if(server.hasArg("i")) {
         uint8_t Pin = server.arg("i").toInt();
         bool Analog = server.hasArg("analog");
         if(server.hasArg("set") || server.hasArg("mode")) {
           if(server.hasArg("mode")) {
             pinMode(Pin, server.arg("mode").toInt());
-            server.send(200, "text/plain", "Pin mode is set!");
+            send("text/plain", "Pin mode is set!");
           }
           if(server.hasArg("set")) {
             if(Analog) analogWrite(Pin, server.arg("set").toInt());
             else digitalWrite(Pin, server.arg("set").toInt());
-            server.send(200, "text/plain", "Pin is set!");
+            send("text/plain", "Pin is set!");
           }
         } else {
-          if(Analog) server.send(200, "text/plain", String("Analog pin #") + Pin + " reads " + analogRead(Pin));
-          else server.send(200, "text/plain", String("Digital pin #") + Pin + " reads " + digitalRead(Pin));
+          if(Analog) send("text/plain", String("Analog pin #") + Pin + " reads " + analogRead(Pin));
+          else send("text/plain", String("Digital pin #") + Pin + " reads " + digitalRead(Pin));
         }
-      } else server.send(200, "text/plain", "No pin index!");
+      } else send("text/plain", "No pin index!");
     });
 
-    server.on("/log", HTTP_GET, [&]() { server.send(200, "text/html", avp::GenerateHTML(GetLog(), 2, "LOG")); });
+    on("/log", [&]() { send("text/html", avp::GenerateHTML(GetLog(), 2, "LOG")); });
 
-    server.on("/reset", HTTP_GET, [&]() {
-      server.send(200, "text/plain", "Resetting ...");
+    on("/reset", [&]() {
+      send("text/plain", "Resetting ...");
       delay(1000);
       ESP.restart();
     });
@@ -151,7 +169,8 @@ public:
   } // BSSIDtoString
 
   static const String scan() {
-    String WiFi_Around;
+    String WiFi_Around; WiFi_Around.reserve(1024); // reserve buffer for response to avoid dynamic memory allocation
+    // Scan for WiFi networks
     int n = WiFi.scanNetworks(false, false);
 
     WiFi_Around = "<table><tr><th>SSID</th><th>RSSI</th><th>Protected</th><th>BSSID</th></tr>";
@@ -181,4 +200,40 @@ public:
     server.handleClient();
     ESP_board_no_server::loop();
   } // loop
+
+  /**
+   * @brief calls server "on" method
+   * @param uri
+   * @param method
+   * @param fn
+   */
+  void on(const Uri &uri, ESP8266WebServer::THandlerFunction fn, HTTPMethod method = HTTP_GET) {
+    server.on(uri, method, fn);
+  } // on
+
+  template<typename T>
+  void AddToRespose(T x) { Response += String(x); }
+
+  void send(const char *content_type) {
+    server.send(200, content_type, Response);
+    Response = ""; // clear response buffer
+  } // send
+  
+  void send(const char *content_type, const char *Add) { server.send(200, content_type, Add); }
+  void send(const char *content_type, const String &Add) { server.send(200, content_type, Add.c_str()); }
 }; // ESP_board_sync_server
+
+template<>
+void ESP_board_sync_server::AddToRespose<const char *>(const char *s) {
+  Response += s;
+}
+
+template<>
+void ESP_board_sync_server::AddToRespose<const String &>(const String &s) {
+  Response += s;
+}
+
+template<>
+void ESP_board_sync_server::AddToRespose<const String>(const String s) {
+  Response += s;
+}
