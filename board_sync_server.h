@@ -71,10 +71,9 @@ public:
 
     // setup Web Server
     on("/", [&, Opts]() {
-      String content;
-      String ipStr = String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3]);
+       String ipStr = String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3]);
       // debug_printf(Name);
-      Response = String("<!DOCTYPE HTML>\r\n<html>Hello from <b>");
+      AddToRespose("<!DOCTYPE HTML>\r\n<html>Hello from <b>");
       AddToRespose(Name);
       AddToRespose("</b> at IP: ");
       AddToRespose(ipStr);
@@ -82,6 +81,10 @@ public:
       AddToRespose(WiFi.macAddress());
       AddToRespose(", Version: ");
       AddToRespose(Version);
+      AddToRespose("<br>Flash (bytes): ");
+      AddToRespose(ESP.getFlashChipSize());
+      AddToRespose(", Free Heap (bytes): ");
+      AddToRespose(ESP.getFreeHeap());
       AddToRespose("<br>Connected to ");
       AddToRespose(WiFi.SSID());
       AddToRespose(" (BSSID: ");
@@ -169,7 +172,8 @@ public:
   } // BSSIDtoString
 
   static const String scan() {
-    String WiFi_Around; WiFi_Around.reserve(1024); // reserve buffer for response to avoid dynamic memory allocation
+    String WiFi_Around;
+    WiFi_Around.reserve(1024); // reserve buffer for response to avoid dynamic memory allocation
     // Scan for WiFi networks
     int n = WiFi.scanNetworks(false, false);
 
@@ -213,27 +217,14 @@ public:
 
   template<typename T>
   void AddToRespose(T x) { Response += String(x); }
-
+  
+  void AddToRespose(const char *s) { Response += s; }
+  void AddToRespose(const String &s) { Response += s; }
   void send(const char *content_type) {
     server.send(200, content_type, Response);
     Response = ""; // clear response buffer
   } // send
-  
+
   void send(const char *content_type, const char *Add) { server.send(200, content_type, Add); }
   void send(const char *content_type, const String &Add) { server.send(200, content_type, Add.c_str()); }
 }; // ESP_board_sync_server
-
-template<>
-void ESP_board_sync_server::AddToRespose<const char *>(const char *s) {
-  Response += s;
-}
-
-template<>
-void ESP_board_sync_server::AddToRespose<const String &>(const String &s) {
-  Response += s;
-}
-
-template<>
-void ESP_board_sync_server::AddToRespose<const String>(const String s) {
-  Response += s;
-}

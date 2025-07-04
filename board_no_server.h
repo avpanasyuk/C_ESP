@@ -70,6 +70,7 @@ struct ESP_board_no_server {
    * return default options
    */
   static Options_t Default() { return {NAME, "L", "group224", BlinkerFunc<>}; } // Default
+  bool OTA_IsInProgress;
 
   template <int LEDpin = LED_BUILTIN> static void BlinkerFunc(enum ConnectionStatus_t ConnStatus) {
     static int Counter = 0;
@@ -119,7 +120,7 @@ public:
    */
   ESP_board_no_server(const char *Name_, const char *default_ssid, const char *default_pass,
                       status_indication_func_t status_indication_func_ = BlinkerFunc<>)
-      : ConnStatus(IDLE), Name(Name_), ssid(default_ssid), pass(default_pass),
+      : ConnStatus(IDLE), OTA_IsInProgress(false), Name(Name_), ssid(default_ssid), pass(default_pass),
         status_indication_func(status_indication_func_) {
 
 // SoftTimer should help to control LED blinking furing connection
@@ -150,19 +151,26 @@ public:
 #if DO_OTA
     ArduinoOTA.setHostname(Name);
 
-    ArduinoOTA.onStart([]() { debug_puts(ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "fs"); });
-    ArduinoOTA.onEnd([]() { debug_puts("\nEnd"); });
+    ArduinoOTA.onStart([this]() { 
+      debug_puts(ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "fs"); 
+      OTA_IsInProgress = true;
+    });
+    ArduinoOTA.onEnd([this]() { 
+      debug_puts("\nEnd"); 
+      OTA_IsInProgress = false;
+    });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
       debug_printf("Progress: %u%%\r", (progress / (total / 100)));
     });
 
-    ArduinoOTA.onError([](ota_error_t error) {
+    ArduinoOTA.onError([this](ota_error_t error) {
       debug_printf("Error[%u]: ", error);
       if(error == OTA_AUTH_ERROR) debug_puts("Auth Failed");
       else if(error == OTA_BEGIN_ERROR) debug_puts("Begin Failed");
       else if(error == OTA_CONNECT_ERROR) debug_puts("Connect Failed");
       else if(error == OTA_RECEIVE_ERROR) debug_puts("Receive Failed");
       else if(error == OTA_END_ERROR) debug_puts("End Failed");
+      OTA_IsInProgress = false;
     });
     ArduinoOTA.begin();
 #endif
