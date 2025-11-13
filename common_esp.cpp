@@ -1,9 +1,6 @@
 #include "service.h"
 
-static String GET_responce;
-
 Ticker SoftTimer;
-
 namespace avp {
   const String &GenerateHTML(const char *html_body, uint16_t AutoRefresh_s, const char *title) {
     static String out;

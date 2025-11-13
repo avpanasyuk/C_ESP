@@ -2,8 +2,6 @@
  * @file WebServer.h
  * @author
  * @brief this is interface class for both sync and async WebServers.
- * Only one implementation file - either SyncWebServer.cpp or AsyncWebServer.cpp
- * should be compiled
  * @version 0.1
  * @date 2025-07-06
  *
@@ -28,7 +26,8 @@
 namespace avp {
   /**
    * @brief This is interface class for Sync and Async Web servers
-   *
+   * Only one implementation file - either SyncWebServer.cpp or AsyncWebServer.cpp
+   * should be compiled. To create an object use generator function "Create"
    */
   class WebServer : public WiFi_Connection {
   public:
@@ -51,18 +50,17 @@ namespace avp {
     };
 
     /**
-     * @brief this class pretends to be either ::WebServer * for sync server or AsyncWebServerRequest * for async
-     * because you need this pointer to call all the member functions
+     * @brief this is a service class. It pretends to be either ::WebServer * for sync server or 
+     * AsyncWebServerRequest * for async, because you need this pointer to call all the member functions below
      */
     class Request_t {
-      public:
+    public:
       virtual bool hasArg(const String &name) const = 0;
       virtual int args() const = 0;
-      virtual const String& arg(const String& name) const = 0;
+      virtual const String &arg(const String &name) const = 0;
       virtual void send(HTTP::Response_t code, const char *contentType = "", const String &content = emptyString) = 0;
     };
 
-    // using SendFunction_t = ::std::function<void(HTTP::Response_t code, const char *contentType, const char *content)>;
     using RequestHandler_t = ::std::function<void(Request_t *pReq, const char *uri, HTTP::Method_t method)>;
     using RH_Simple_t = ::std::function<void(Request_t *pReq)>;
 
@@ -82,6 +80,5 @@ namespace avp {
     virtual void on(const char *uri, RH_Simple_t handler, HTTP::Method_t method = HTTP::Method_t::GET) = 0;
 
     static ::std::unique_ptr<WebServer> Create(uint16_t port);
-
   }; // class Server
 } // namespace avp
