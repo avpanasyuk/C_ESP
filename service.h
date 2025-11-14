@@ -6,7 +6,7 @@
 #include <memory>
 #include <stdint.h>
 #include <string.h>
-// #include <stdarg.h>
+#include <C_ARDUINO/General.h>
 
 
 extern Ticker SoftTimer;

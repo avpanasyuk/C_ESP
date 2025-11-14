@@ -35,8 +35,9 @@ static const char *LittleFS_AUTH = "/net_auth.txt";
 #define NAME "DefineNAME"
 #endif
 
-#include "../C_General/MyTime.hpp"
 #include "../C_General/Error.h"
+#include "../C_General/millis_micros.hpp"
+#include "../C_General/MyTime.hpp"
 #include "service.h"
 
 struct WiFi_Connection {
@@ -51,12 +52,12 @@ struct WiFi_Connection {
   typedef void (*status_indication_func_t)(Status_t);
 
   struct Options_t {
-    const char *Name;                                 //< name of the device as seen by DNS
-    const char *default_ssid;                         //< default ssid to connect to if stored
+    const char *Name;                                 ///< name of the device as seen by DNS
+    const char *default_ssid;                         ///< default ssid to connect to if stored
                                                       // configuration failed
-    const char *default_pass;                         //< default password to connect to if stored
+    const char *default_pass;                         ///< default password to connect to if stored
                                                       // configuration failed
-    status_indication_func_t status_indication_func_; //< function which will be
+    status_indication_func_t status_indication_func_; ///< function which will be
                                                       // called every 100 ms with
                                                       // connection status
   };
@@ -67,7 +68,7 @@ struct WiFi_Connection {
   static Options_t DefaultOpts() { return {NAME, "L", "group224", BlinkerFunc<>}; } // Default
   bool OTA_IsInProgress;
 
-  template <int LEDpin = LED_BUILTIN> 
+  template<int LEDpin = LED_BUILTIN>
   static void BlinkerFunc(Status_t ConnStatus) {
     static int Counter = 0;
     static int LEDstatus = 0;
@@ -94,13 +95,13 @@ struct WiFi_Connection {
     } // switch (Stat)
   } // BlinkerFunc
 
-  static constexpr uint8_t STR_SIZE = 32; //< ssid and password string sizes
+  static constexpr uint8_t STR_SIZE = 32; ///< ssid and password string sizes
 protected:
   IPAddress ip;
   const char *Name;
   String ssid, pass;
   status_indication_func_t status_indication_func;
-  uint8_t BSSID[6]; //< BSSID of the best AP
+  uint8_t BSSID[6]; ///< BSSID of the best AP
 
   void Timer100msCallback() { status_indication_func(ConnStatus); } // Timer100msCallback
 
@@ -115,7 +116,7 @@ public:
    * @param default_pass if stored configuration failed to connect try this one
    */
   WiFi_Connection(const char *Name_, const char *default_ssid, const char *default_pass,
-                      status_indication_func_t status_indication_func_ = BlinkerFunc<>)
+                  status_indication_func_t status_indication_func_ = BlinkerFunc<>)
       : ConnStatus(Status_t::IDLE), OTA_IsInProgress(false), Name(Name_), ssid(default_ssid), pass(default_pass),
         status_indication_func(status_indication_func_) {
 
@@ -147,12 +148,12 @@ public:
 #if defined(DO_OTA) && DO_OTA
     ArduinoOTA.setHostname(Name);
 
-    ArduinoOTA.onStart([this]() { 
-      debug_puts(ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "fs"); 
+    ArduinoOTA.onStart([this]() {
+      debug_puts(ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "fs");
       OTA_IsInProgress = true;
     });
-    ArduinoOTA.onEnd([this]() { 
-      debug_puts("\nEnd"); 
+    ArduinoOTA.onEnd([this]() {
+      debug_puts("\nEnd");
       OTA_IsInProgress = false;
     });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -171,7 +172,7 @@ public:
     ArduinoOTA.begin();
 #endif
   } // constructor
-  
+
   WiFi_Connection(const Options_t &Opts = DefaultOpts())
       : WiFi_Connection(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_) {}
 
@@ -196,11 +197,14 @@ public:
   } // ConnectToBestAP
 
   const uint8_t *FindBestAP(const char *Name) {
+    avp::ReleaseWhenOutOfScope<int> n(
 #if defined(ESP8266)
-    int n = WiFi.scanNetworks(false, false, 0, (uint8_t *)Name);
+        WiFi.scanNetworks(false, false, 0, (uint8_t *)Name),
 #else
-    int n = WiFi.scanNetworks(false, false, false, 300U, 0, Name, nullptr);
+        WiFi.scanNetworks(false, false, false, 300U, 0, Name, nullptr),
 #endif
+        [](int) { WiFi.scanDelete(); });
+
     int BestRSSI_i = -1;
     int32_t BestRSSI = INT32_MIN;
 
@@ -210,6 +214,7 @@ public:
                    BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
       if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
     }
+
     return BestRSSI_i == -1 ? nullptr : WiFi.BSSID(BestRSSI_i);
   } // FindBestAP
 
@@ -224,8 +229,7 @@ public:
 
   void post_connection() {
     ip = WiFi.localIP();
-    debug_printf("Connected in STA mode, IP:%s!\n",
-                 (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
+    debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
     ConnStatus = Status_t::CONNECTED;
     WiFi.setAutoConnect(false);
     WiFi.setAutoReconnect(false);
@@ -241,6 +245,27 @@ public:
 
   String getIP() const { return ip.toString(); }
 
+  const String &Greeting() const {
+    static String Resp;
+    Resp.reserve(200);
+    Resp = "Hello from <b>";
+    Resp += Name;
+    Resp += "</b> at IP: ";
+    Resp += getIP();
+    Resp += ", MAC: ";
+    Resp += WiFi.macAddress();
+    Resp += "<br>Flash (bytes): ";
+    Resp += ESP.getFlashChipSize();
+    Resp += ", Free Heap (bytes): ";
+    Resp += ESP.getFreeHeap();
+    Resp += "<br>Connected to ";
+    Resp += WiFi.SSID();
+    Resp += " (BSSID: ";
+    Resp += BSSIDtoString(BSSID);
+    Resp += ")";
+    return Resp;
+  } // Greeting
+
   void StoreAUTH(const char *SSID, const char *Pass) {
     File f = LittleFS.open(LittleFS_AUTH, "w");
     if(f) {
@@ -252,8 +277,8 @@ public:
     } else debug_puts("Failed to open stored credentials file!\n");
   } // StoreAUTH
 
-  virtual void loop() {
-    static avp::TimePeriod1<10UL*60*1000, millis> TP;
+  virtual void call_in_loop() {
+    static avp::TimePeriod1<10UL * 60 * 1000, millis> TP;
     if(TP.Expired()) TryToConnect(); // try to connect every 10 minutes
 
 #if defined(DO_OTA) && DO_OTA
@@ -264,4 +289,39 @@ public:
 #endif
     // yield();
   } // loop
-}; // ESP_board
+
+  static String BSSIDtoString(const uint8_t *BSSID) {
+    return avp::String_printf("%02x:%02x:%02x:%02x:%02x:%02x", BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4],
+                              BSSID[5]);
+  } // BSSIDtoString
+
+  /**
+   * @brief scans all available networks and returns a table
+   *
+   * @return const String& - HTML formatted table
+   */
+  static const String &scan() {
+    static String WiFi_Around;
+    WiFi_Around.reserve(100); // reserve buffer for response to avoid dynamic memory allocation
+    // Scan for WiFi networks
+    int n = WiFi.scanNetworks(false, false);
+
+    WiFi_Around = "<table><tr><th>SSID</th><th>RSSI</th><th>Protected</th><th>BSSID</th></tr>";
+    for(int i = 0; i < n; ++i) {
+      // Print SSID and RSSI for each network found
+      WiFi_Around += "<tr>";
+      WiFi_Around += "<td>";
+      WiFi_Around += WiFi.SSID(i);
+      WiFi_Around += "</td><td>";
+      WiFi_Around += WiFi.RSSI(i);
+      WiFi_Around += "</td><td>";
+      WiFi_Around += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*";
+      WiFi_Around += "</td><td>";
+      WiFi_Around += BSSIDtoString(WiFi.BSSID(i));
+      WiFi_Around += "</td></tr>";
+    }
+    WiFi_Around += "</table>";
+    WiFi.scanDelete();
+    return WiFi_Around;
+  } // scan
+}; // struct WiFi_Connection

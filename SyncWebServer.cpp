@@ -21,12 +21,13 @@ using WebServer = ESP8266WebServer;
 #error "Unsupported platform"
 #endif
 
+#include "C_General/Error.h"
+#include "C_ARDUINO/General.h"
 #include "WebServer.h"
 
+class avp::Print DebugPrint(debug_puts);
 namespace avp {
   class SyncWebServer : public avp::WebServer, ::WebServer {
-    // ::WebServer server;
-
     static HTTPMethod ConvertMethod(HTTP::Method_t m) {
       switch(m) {
       case HTTP::Method_t::GET:
@@ -48,43 +49,110 @@ namespace avp {
         return HTTPMethod::HTTP_ANY;
       }
     } // ConvertMethod
-    
+
     class Request_t : public avp::WebServer::Request_t {
-      ::WebServer *p;
+      ::WebServer *const p;
 
     public:
-      Request_t(::WebServer *p_) : p(p_) {}
+      Request_t(::WebServer *p_) : p(p_) { AVP_ASSERT(p != nullptr); }
 
       virtual bool hasArg(const String &name) const override { return p->hasArg(name); }
       virtual int args() const override { return p->args(); }
-      virtual const String& arg(const String& name) const override { return p->arg(name); }; 
-      virtual void send(HTTP::Response_t code, const char *contentType, const String &content) override {
-        p->send(int(code),contentType,content);
+      virtual const String &arg(const String &name) const override { return p->arg(name); };
+      virtual void send(const char *contentType, const String &content,
+        HTTP::Response_t code = HTTP::Response_t::OK) {
+        p->send(int(code), contentType, content);
       };
+      virtual void sendHeader(const String &name, const String &value, bool first = false) {
+        p->sendHeader(name, value, first);
+      }
+      virtual HTTPUpload &upload() { return p->upload(); }
     }; // class Request_t
 
   public:
-    explicit SyncWebServer(uint16_t port) : WebServer(), ::WebServer(port) {}
-    virtual void begin() override { ::WebServer::begin(); }
-      
+    explicit SyncWebServer(const Options_t &Opts, uint16_t port) : 
+    WebServer(Opts), ::WebServer(port) {}
+    virtual void begin() {
+      ::WebServer::begin();
+      WebServer::begin();
+      on("/update", [](WebServer::Request_t &&rReq) {
+        rReq.send("text/html",
+          F("<!DOCTYPE html><html><head>"
+            "<title>ESP8266 OTA Update</title>"
+            "</head><body>"
+            "<h1>ESP8266 Firmware Update</h1>"
+            "<p>Upload new firmware (.bin file):</p>"
+            "<form method='POST' action='/upload' enctype='multipart/form-data'>"
+            "<input type='file' name='update' accept='.bin'>"
+            "<input type='submit' value='Update'>"
+            "</form></body></html>"));
+      });
+
+      on("/upload", [](WebServer::Request_t &&rReq) {
+        // auto &syncReq = static_cast<SyncWebServer::Request_t &>(rReq);
+        // syncReq.sendHeader("Connection", "close");
+        rReq.send("text/plain", (Update.hasError()) ? "FAIL" : "OK");
+      },
+        [](WebServer::Request_t &&rReq) {
+          auto &syncReq = static_cast<SyncWebServer::Request_t &>(rReq);
+          HTTPUpload &upload = syncReq.upload();
+
+          if(upload.status == UPLOAD_FILE_START) {
+            debug_printf("Update: %s\n", upload.filename.c_str());
+            WiFiUDP::stopAll();
+            if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
+              Update.printError(DebugPrint);
+            }
+          } else if(upload.status == UPLOAD_FILE_WRITE) {
+            if(Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+              Update.printError(DebugPrint);
+            }
+          } else if(upload.status == UPLOAD_FILE_END) {
+            if(Update.end(true)) {
+              debug_printf("Update Success: %u bytes\n", upload.totalSize);
+              rReq.send("text/plain", "Update successful! Device rebooting.");
+              delay(1000);
+              ESP.restart();
+            } else {
+              Update.printError(DebugPrint);
+              rReq.send("text/plain", "Update failed.", HTTP::Response_t::INTERNAL_SERVER_ERROR);
+            }
+          } else if(upload.status == UPLOAD_FILE_ABORTED) {
+            Update.end();
+            rReq.send("text/plain", "Update aborted.", HTTP::Response_t::INTERNAL_SERVER_ERROR);
+          }
+        });
+    }
+
+    virtual void call_in_loop() override {
+      WebServer::call_in_loop();
+      ::WebServer::handleClient();
+    } // call_in_loop
 
     virtual void on(const char *uri, RequestHandler_t handler, HTTP::Method_t method = HTTP::Method_t::GET) override {
-      ::WebServer::on(uri, ConvertMethod(method), [&]() {
-        Request_t r(this);
-        handler(&r, uri, method);
+      ::WebServer::on(uri, ConvertMethod(method), [this, handler, uri, method]() { // do not capture by reference, stack disappears
+        handler(Request_t(this), uri, method);
       });
     }
 
     virtual void on(const char *uri, RH_Simple_t handler, HTTP::Method_t method = HTTP::Method_t::GET) override {
-      ::WebServer::on(uri, ConvertMethod(method), [&]() {
-        Request_t r(this);
-        handler(&r);
+      ::WebServer::on(uri, ConvertMethod(method), [this, handler]() {
+        handler(Request_t(this));
       });
+    }
+
+    virtual void on(const char *uri, RH_Simple_t handler, RH_Simple_t upload_handler, HTTP::Method_t method = HTTP::Method_t::POST) override {
+      ::WebServer::on(uri, ConvertMethod(method), [this, handler]() {
+        handler(Request_t(this));
+      },
+        [this, upload_handler]() {
+          upload_handler(Request_t(this));
+        });
     }
   }; // class WebServer
 
-::std::unique_ptr<WebServer> WebServer::Create(uint16_t port) {
-    return ::std::make_unique<SyncWebServer>(port);
+  ::std::unique_ptr<WebServer> WebServer::Create(const Options_t &Opts, uint16_t port) {
+    return ::std::make_unique<SyncWebServer>(Opts, port);
   }
 
 } // namespace avp
