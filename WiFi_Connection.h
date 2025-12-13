@@ -35,9 +35,11 @@ static const char *LittleFS_AUTH = "/net_auth.txt";
 #define NAME "DefineNAME"
 #endif
 
+#include <Arduino.h>
 #include "../C_General/Error.h"
 #include "../C_General/millis_micros.hpp"
 #include "../C_General/MyTime.hpp"
+#include "fast_gpio.hpp"
 #include "service.h"
 
 struct WiFi_Connection {
@@ -50,6 +52,7 @@ struct WiFi_Connection {
 
   // typedef std::function<void(enum Status_t)> status_indication_func_t;
   typedef void (*status_indication_func_t)(Status_t);
+  static void idle(Status_t) {};
 
   struct Options_t {
     const char *Name;                                 ///< name of the device as seen by DNS
@@ -65,10 +68,14 @@ struct WiFi_Connection {
   /**
    * return default options
    */
-  static Options_t DefaultOpts() { return {NAME, "L", "group224", BlinkerFunc<>}; } // Default
+  static Options_t DefaultOpts() { return {NAME, "L", "group224", idle}; } // Default
   bool OTA_IsInProgress;
 
+  #ifdef LED_BUILTIN
   template<int LEDpin = LED_BUILTIN>
+  #else
+  template<int LEDpin>
+  #endif
   static void BlinkerFunc(Status_t ConnStatus) {
     static int Counter = 0;
     static int LEDstatus = 0;
@@ -116,7 +123,7 @@ public:
    * @param default_pass if stored configuration failed to connect try this one
    */
   WiFi_Connection(const char *Name_, const char *default_ssid, const char *default_pass,
-                  status_indication_func_t status_indication_func_ = BlinkerFunc<>)
+                  status_indication_func_t status_indication_func_ = idle)
       : ConnStatus(Status_t::IDLE), OTA_IsInProgress(false), Name(Name_), ssid(default_ssid), pass(default_pass),
         status_indication_func(status_indication_func_) {
 
@@ -130,7 +137,7 @@ public:
     // connect to the one with the best RSSI
 
     // but if I have some stored credentials use them instead of default ones
-    LittleFS.begin();
+    LittleFS.begin(true);
     if(LittleFS.exists(LittleFS_AUTH)) {
       File f = LittleFS.open(LittleFS_AUTH, "r");
       if(f) {
@@ -242,6 +249,9 @@ public:
       else open_AP();
     }
   } // TryToConnect
+
+  Status_t GetStatus() const { return ConnStatus; }
+  bool IsConnected() const { return GetStatus() == Status_t::CONNECTED; }
 
   String getIP() const { return ip.toString(); }
 

@@ -53,9 +53,12 @@ namespace avp {
     public:
       virtual bool hasArg(const String &name) const = 0;
       virtual int args() const = 0;
-      virtual const String &arg(const String &name) const = 0;
+      virtual const String arg(const String &name) const = 0;
       virtual void send(const char *contentType = "", const String &content = emptyString,
         HTTP::Response_t code = HTTP::Response_t::OK) = 0;
+      virtual void send_P(const char *content_type, const uint8_t *content,
+        size_t contentLength, HTTP::Response_t code = HTTP::Response_t::OK) = 0;
+      virtual void sendHeader(const String &name, const String &value, bool first = false) = 0;
     }; // class Request_t
 
     using RequestHandler_t = ::std::function<void(Request_t &&rReq, const char *uri, HTTP::Method_t method)>;

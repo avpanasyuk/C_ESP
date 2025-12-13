@@ -21,11 +21,13 @@ using WebServer = ESP8266WebServer;
 #error "Unsupported platform"
 #endif
 
-#include "C_General/Error.h"
+#include "C_General/Error.hpp"
+#include "C_General/MyTime.hpp"
 #include "C_ARDUINO/General.h"
 #include "WebServer.h"
 
 class avp::Print DebugPrint(debug_puts);
+static void dot() { debug_puts("."); }
 namespace avp {
   class SyncWebServer : public avp::WebServer, ::WebServer {
     static HTTPMethod ConvertMethod(HTTP::Method_t m) {
@@ -45,8 +47,7 @@ namespace avp {
       case HTTP::Method_t::OPTIONS:
         return HTTPMethod::HTTP_OPTIONS;
       default:
-      case HTTP::Method_t::ANY:
-        return HTTPMethod::HTTP_ANY;
+        return HTTP_ANY;
       }
     } // ConvertMethod
 
@@ -58,11 +59,15 @@ namespace avp {
 
       virtual bool hasArg(const String &name) const override { return p->hasArg(name); }
       virtual int args() const override { return p->args(); }
-      virtual const String &arg(const String &name) const override { return p->arg(name); };
+      virtual const String arg(const String &name) const override { return p->arg(name); };
       virtual void send(const char *contentType, const String &content,
         HTTP::Response_t code = HTTP::Response_t::OK) {
         p->send(int(code), contentType, content);
-      };
+      }
+      virtual void send_P(const char *content_type, const uint8_t *content,
+        size_t contentLength, HTTP::Response_t code = HTTP::Response_t::OK) {
+        p->send_P(int(code), content_type, (const char *)content, contentLength);
+      }
       virtual void sendHeader(const String &name, const String &value, bool first = false) {
         p->sendHeader(name, value, first);
       }
@@ -70,17 +75,16 @@ namespace avp {
     }; // class Request_t
 
   public:
-    explicit SyncWebServer(const Options_t &Opts, uint16_t port) : 
-    WebServer(Opts), ::WebServer(port) {}
+    explicit SyncWebServer(const Options_t &Opts, uint16_t port) : avp::WebServer(Opts), ::WebServer(port) {}
     virtual void begin() {
       ::WebServer::begin();
-      WebServer::begin();
-      on("/update", [](WebServer::Request_t &&rReq) {
+      avp::WebServer::begin();
+      on("/update", [](avp::WebServer::Request_t &&rReq) {
         rReq.send("text/html",
           F("<!DOCTYPE html><html><head>"
-            "<title>ESP8266 OTA Update</title>"
+            "<title>ESP OTA Update</title>"
             "</head><body>"
-            "<h1>ESP8266 Firmware Update</h1>"
+            "<h1>ESP Firmware Update</h1>"
             "<p>Upload new firmware (.bin file):</p>"
             "<form method='POST' action='/upload' enctype='multipart/form-data'>"
             "<input type='file' name='update' accept='.bin'>"
@@ -88,18 +92,20 @@ namespace avp {
             "</form></body></html>"));
       });
 
-      on("/upload", [](WebServer::Request_t &&rReq) {
+      on("/upload", [](avp::WebServer::Request_t &&rReq) {
         // auto &syncReq = static_cast<SyncWebServer::Request_t &>(rReq);
         // syncReq.sendHeader("Connection", "close");
         rReq.send("text/plain", (Update.hasError()) ? "FAIL" : "OK");
       },
-        [](WebServer::Request_t &&rReq) {
+        [](avp::WebServer::Request_t &&rReq) {
           auto &syncReq = static_cast<SyncWebServer::Request_t &>(rReq);
           HTTPUpload &upload = syncReq.upload();
 
           if(upload.status == UPLOAD_FILE_START) {
             debug_printf("Update: %s\n", upload.filename.c_str());
+#ifdef ESP8266
             WiFiUDP::stopAll();
+#endif
             if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
               Update.printError(DebugPrint);
             }
@@ -125,8 +131,11 @@ namespace avp {
     }
 
     virtual void call_in_loop() override {
-      WebServer::call_in_loop();
+      avp::WebServer::call_in_loop();
       ::WebServer::handleClient();
+#if defined(DEBUG) && DEBUG
+    avp::Periodically<dot>::Run(1000);
+#endif
     } // call_in_loop
 
     virtual void on(const char *uri, RequestHandler_t handler, HTTP::Method_t method = HTTP::Method_t::GET) override {
@@ -150,9 +159,8 @@ namespace avp {
         });
     }
   }; // class WebServer
-
-  ::std::unique_ptr<WebServer> WebServer::Create(const Options_t &Opts, uint16_t port) {
-    return ::std::make_unique<SyncWebServer>(Opts, port);
-  }
-
 } // namespace avp
+
+::std::unique_ptr<avp::WebServer> avp::WebServer::Create(const Options_t &Opts, uint16_t port) {
+  return ::std::make_unique<avp::SyncWebServer>(Opts, port);
+}
