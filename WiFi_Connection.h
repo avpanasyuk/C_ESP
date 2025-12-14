@@ -157,6 +157,9 @@ public:
 
     ArduinoOTA.onStart([this]() {
       debug_puts(ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "fs");
+      StopServer();
+      delay(100);
+      
       OTA_IsInProgress = true;
     });
     ArduinoOTA.onEnd([this]() {
@@ -182,6 +185,8 @@ public:
 
   WiFi_Connection(const Options_t &Opts = DefaultOpts())
       : WiFi_Connection(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_) {}
+
+  virtual void StopServer() = 0;    
 
   void ConnectToBestAP(const char *SSID, const char *Pass) {
     const uint8_t *pBSSID = FindBestAP(SSID);
@@ -297,7 +302,7 @@ public:
 #if defined(ESP8266)
     MDNS.update();
 #endif
-    // yield();
+    delay(1);
   } // loop
 
   static String BSSIDtoString(const uint8_t *BSSID) {

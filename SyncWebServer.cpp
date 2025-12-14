@@ -106,7 +106,8 @@ namespace avp {
 #ifdef ESP8266
             WiFiUDP::stopAll();
 #endif
-            if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
+            // if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
+            if(!Update.begin(UPDATE_SIZE_UNKNOWN)) {
               Update.printError(DebugPrint);
             }
           } else if(upload.status == UPLOAD_FILE_WRITE) {
@@ -130,11 +131,13 @@ namespace avp {
         });
     }
 
+    virtual void StopServer() override { ::WebServer::stop(); }
+
     virtual void call_in_loop() override {
       avp::WebServer::call_in_loop();
       ::WebServer::handleClient();
 #if defined(DEBUG) && DEBUG
-    avp::Periodically<dot>::Run(1000);
+      avp::Periodically<dot>::Run(1000);
 #endif
     } // call_in_loop
 
