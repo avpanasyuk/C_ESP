@@ -168,7 +168,12 @@ public:
 
     ArduinoOTA.onStart([this]() {
       debug_puts(ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "fs");
+#ifdef ESP32
       WiFi.setSleep(false); // prevents WiFi from napping
+#endif
+#ifdef ESP8266
+      WiFi.setSleepMode(WIFI_NONE_SLEEP);
+#endif
       StopServer();
       delay(100);
 
