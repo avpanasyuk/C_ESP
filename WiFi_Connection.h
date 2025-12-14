@@ -302,7 +302,8 @@ public:
 #if defined(ESP8266)
     MDNS.update();
 #endif
-    delay(1);
+    // delay(1);
+    yield();
   } // loop
 
   static String BSSIDtoString(const uint8_t *BSSID) {

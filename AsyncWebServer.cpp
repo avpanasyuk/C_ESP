@@ -56,6 +56,8 @@ namespace avp {
         (void)requestUri;
         (void)upload;
       }
+      virtual WiFiClient client() const { return p->client(); }
+      virtual void sendContent(const String &content) { p->sendContent(content); }
     }; // class Request_t
 
   public:

@@ -59,6 +59,8 @@ namespace avp {
       virtual void send_P(const char *content_type, const uint8_t *content,
         size_t contentLength, HTTP::Response_t code = HTTP::Response_t::OK) = 0;
       virtual void sendHeader(const String &name, const String &value, bool first = false) = 0;
+      virtual WiFiClient client() const = 0;
+      virtual void sendContent(const String& content) = 0;
     }; // class Request_t
 
     using RequestHandler_t = ::std::function<void(Request_t &&rReq, const char *uri, HTTP::Method_t method)>;
