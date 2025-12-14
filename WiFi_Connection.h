@@ -157,12 +157,14 @@ public:
 
     ArduinoOTA.onStart([this]() {
       debug_puts(ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "fs");
+      WiFi.setSleep(false); // prevents WiFi from napping
       StopServer();
       delay(100);
       
       OTA_IsInProgress = true;
     });
     ArduinoOTA.onEnd([this]() {
+      WiFi.setSleep(true);
       debug_puts("\nEnd");
       OTA_IsInProgress = false;
     });
