@@ -52,7 +52,7 @@ struct WiFi_Connection {
 
   // typedef std::function<void(enum Status_t)> status_indication_func_t;
   typedef void (*status_indication_func_t)(Status_t);
-  static void idle(Status_t) {};
+  static void idle(Status_t){};
 
   struct Options_t {
     const char *Name;                                 ///< name of the device as seen by DNS
@@ -71,11 +71,11 @@ struct WiFi_Connection {
   static Options_t DefaultOpts() { return {NAME, "L", "group224", idle}; } // Default
   bool OTA_IsInProgress;
 
-  #ifdef LED_BUILTIN
+#ifdef LED_BUILTIN
   template<int LEDpin = LED_BUILTIN>
-  #else
+#else
   template<int LEDpin>
-  #endif
+#endif
   static void BlinkerFunc(Status_t ConnStatus) {
     static int Counter = 0;
     static int LEDstatus = 0;
@@ -123,21 +123,32 @@ public:
    * @param default_pass if stored configuration failed to connect try this one
    */
   WiFi_Connection(const char *Name_, const char *default_ssid, const char *default_pass,
-                  status_indication_func_t status_indication_func_ = idle)
+    status_indication_func_t status_indication_func_ = idle)
       : ConnStatus(Status_t::IDLE), OTA_IsInProgress(false), Name(Name_), ssid(default_ssid), pass(default_pass),
         status_indication_func(status_indication_func_) {
 
 // SoftTimer should help to control LED blinking furing connection
 #ifdef ESP8266
-    SoftTimer.attach_ms(100, [this]() { this->Timer100msCallback(); });
+    SoftTimer.attach_ms(100, [this]() {
+      this->Timer100msCallback();
+    });
 #else
-    SoftTimer.attach_ms<WiFi_Connection *>(100, [](WiFi_Connection *a) { a->Timer100msCallback(); }, this);
+    SoftTimer.attach_ms<WiFi_Connection *>(100, [](WiFi_Connection *a) {
+      a->Timer100msCallback();
+    },
+      this);
 #endif
     WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
-    // connect to the one with the best RSSI
+                                // connect to the one with the best RSSI
 
     // but if I have some stored credentials use them instead of default ones
+#ifdef ESP32
     LittleFS.begin(true);
+#endif
+#ifdef ESP8266
+    LittleFS.begin();
+#endif
+
     if(LittleFS.exists(LittleFS_AUTH)) {
       File f = LittleFS.open(LittleFS_AUTH, "r");
       if(f) {
@@ -160,7 +171,7 @@ public:
       WiFi.setSleep(false); // prevents WiFi from napping
       StopServer();
       delay(100);
-      
+
       OTA_IsInProgress = true;
     });
     ArduinoOTA.onEnd([this]() {
@@ -188,14 +199,13 @@ public:
   WiFi_Connection(const Options_t &Opts = DefaultOpts())
       : WiFi_Connection(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_) {}
 
-  virtual void StopServer() = 0;    
+  virtual void StopServer() = 0;
 
   void ConnectToBestAP(const char *SSID, const char *Pass) {
     const uint8_t *pBSSID = FindBestAP(SSID);
     if(pBSSID != nullptr) {
       memcpy(BSSID, FindBestAP(SSID), sizeof(BSSID));
-      debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1],
-                   BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+      debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
       WiFi.mode(WIFI_STA);
       if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
       WiFi.begin(SSID, Pass, 0, BSSID);
@@ -213,19 +223,20 @@ public:
   const uint8_t *FindBestAP(const char *Name) {
     avp::ReleaseWhenOutOfScope<int> n(
 #if defined(ESP8266)
-        WiFi.scanNetworks(false, false, 0, (uint8_t *)Name),
+      WiFi.scanNetworks(false, false, 0, (uint8_t *)Name),
 #else
-        WiFi.scanNetworks(false, false, false, 300U, 0, Name, nullptr),
+      WiFi.scanNetworks(false, false, false, 300U, 0, Name, nullptr),
 #endif
-        [](int) { WiFi.scanDelete(); });
+      [](int) {
+        WiFi.scanDelete();
+      });
 
     int BestRSSI_i = -1;
     int32_t BestRSSI = INT32_MIN;
 
     for(int i = 0; i < n; ++i) {
       uint8_t *BSSID = WiFi.BSSID(i);
-      debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i),
-                   BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+      debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
       if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
     }
 
@@ -238,7 +249,7 @@ public:
     ip = WiFi.softAPIP();
     ConnStatus = Status_t::AP_MODE;
     debug_printf("Waiting for connection in AP mode, IP:%s!\n",
-                 (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
+      (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
   } // open_AP
 
   void post_connection() {
@@ -309,8 +320,7 @@ public:
   } // loop
 
   static String BSSIDtoString(const uint8_t *BSSID) {
-    return avp::String_printf("%02x:%02x:%02x:%02x:%02x:%02x", BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4],
-                              BSSID[5]);
+    return avp::String_printf("%02x:%02x:%02x:%02x:%02x:%02x", BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
   } // BSSIDtoString
 
   /**

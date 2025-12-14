@@ -73,7 +73,7 @@ namespace avp {
       }
       virtual HTTPUpload &upload() { return p->upload(); }
       virtual WiFiClient client() const { return p->client(); }
-      virtual void sendContent(const String& content) { p->sendContent(content);  }
+      virtual void sendContent(const String &content) { p->sendContent(content); }
     }; // class Request_t
 
   public:
@@ -100,16 +100,18 @@ namespace avp {
         rReq.send("text/plain", (Update.hasError()) ? "FAIL" : "OK");
       },
         [](avp::WebServer::Request_t &&rReq) {
-          auto &syncReq = static_cast<SyncWebServer::Request_t &>(rReq);
-          HTTPUpload &upload = syncReq.upload();
+        auto &syncReq = static_cast<SyncWebServer::Request_t &>(rReq);
+        HTTPUpload &upload = syncReq.upload();
 
-          if(upload.status == UPLOAD_FILE_START) {
-            debug_printf("Update: %s\n", upload.filename.c_str());
+        if(upload.status == UPLOAD_FILE_START) {
+          debug_printf("Update: %s\n", upload.filename.c_str());
 #ifdef ESP8266
-            WiFiUDP::stopAll();
+          WiFiUDP::stopAll();
+          if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
 #endif
-            // if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
+#ifdef ESP32
             if(!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+#endif
               Update.printError(DebugPrint);
             }
           } else if(upload.status == UPLOAD_FILE_WRITE) {
@@ -133,39 +135,41 @@ namespace avp {
         });
     }
 
-    virtual void StopServer() override { ::WebServer::stop(); }
+    virtual void StopServer() override {
+        ::WebServer::stop(); }
 
     virtual void call_in_loop() override {
-      avp::WebServer::call_in_loop();
-      ::WebServer::handleClient();
+        avp::WebServer::call_in_loop();
+        ::WebServer::handleClient();
 #if defined(DEBUG) && DEBUG
-      avp::Periodically<dot>::Run(1000);
+        avp::Periodically<dot>::Run(1000);
 #endif
     } // call_in_loop
 
     virtual void on(const char *uri, RequestHandler_t handler, HTTP::Method_t method = HTTP::Method_t::GET) override {
-      ::WebServer::on(uri, ConvertMethod(method), [this, handler, uri, method]() { // do not capture by reference, stack disappears
-        handler(Request_t(this), uri, method);
-      });
+        ::WebServer::on(uri, ConvertMethod(method), [this, handler, uri, method]() { // do not capture by reference, stack disappears
+          handler(Request_t(this), uri, method);
+        });
     }
 
     virtual void on(const char *uri, RH_Simple_t handler, HTTP::Method_t method = HTTP::Method_t::GET) override {
-      ::WebServer::on(uri, ConvertMethod(method), [this, handler]() {
-        handler(Request_t(this));
-      });
+        ::WebServer::on(uri, ConvertMethod(method), [this, handler]() {
+          handler(Request_t(this));
+        });
     }
 
     virtual void on(const char *uri, RH_Simple_t handler, RH_Simple_t upload_handler, HTTP::Method_t method = HTTP::Method_t::POST) override {
-      ::WebServer::on(uri, ConvertMethod(method), [this, handler]() {
-        handler(Request_t(this));
-      },
-        [this, upload_handler]() {
-          upload_handler(Request_t(this));
-        });
+        ::WebServer::on(uri, ConvertMethod(method), [this, handler]() {
+          handler(Request_t(this));
+        },
+          [this, upload_handler]() {
+            upload_handler(Request_t(this));
+          });
     }
-  }; // class WebServer
-} // namespace avp
+    }; // class WebServer
+  } // namespace avp
 
-::std::unique_ptr<avp::WebServer> avp::WebServer::Create(const Options_t &Opts, uint16_t port) {
-  return ::std::make_unique<avp::SyncWebServer>(Opts, port);
-}
+  ::std::unique_ptr<avp::WebServer>
+  avp::WebServer::Create(const Options_t &Opts, uint16_t port) {
+    return ::std::make_unique<avp::SyncWebServer>(Opts, port);
+  }
