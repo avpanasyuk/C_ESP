@@ -79,26 +79,25 @@ namespace avp {
 #endif
     static void BlinkerFunc(Status_t ConnStatus) {
       static int Counter = 0;
-      static int LEDstatus = 0;
 
       switch(ConnStatus) {
       case Status_t::IDLE:
-        if(LEDstatus == 0) digitalWrite(LEDpin, LEDstatus = 1); // LED off
+        avp::SetPin<LEDpin>(); // LED off
         break;
       case Status_t::TRYING_TO_CONNECT:
         if(++Counter > 1) {
           Counter = 0;
-          digitalWrite(LEDpin, LEDstatus = 1 - LEDstatus); // LED off
+          avp::TogglePin<LEDpin>(); 
         }
         break;
       case Status_t::AP_MODE:
         if(++Counter > 4) {
           Counter = 0;
-          digitalWrite(LEDpin, LEDstatus = 1 - LEDstatus); // LED off
+          avp::TogglePin<LEDpin>(); 
         }
         break;
       case Status_t::CONNECTED:
-        if(LEDstatus == 1) digitalWrite(LEDpin, LEDstatus = 0); // LED on
+        avp::ClearPin<LEDpin>(); // LED on
         break;
       } // switch (Stat)
     } // BlinkerFunc
@@ -175,7 +174,7 @@ namespace avp {
 #ifdef ESP8266
         WiFi.setSleepMode(WIFI_NONE_SLEEP);
 #endif
-       delay(100);
+        delay(100);
 
         OTA_IsInProgress = true;
       });
