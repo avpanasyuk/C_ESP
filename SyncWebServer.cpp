@@ -135,9 +135,6 @@ namespace avp {
         });
     }
 
-    virtual void StopServer() override {
-        ::WebServer::stop(); }
-
     virtual void call_in_loop() override {
         avp::WebServer::call_in_loop();
         ::WebServer::handleClient();

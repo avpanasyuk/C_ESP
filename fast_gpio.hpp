@@ -29,6 +29,19 @@ namespace avp {
 #define DIGITAL_TOGGLE_BODY                      \
   if(pin < 32) GPIO.out ^= ((uint32_t)1 << pin); \
   else GPIO.out1.val ^= ((uint32_t)1 << (pin - 32));
+#endif
+#ifdef ESP8266
+#define DIGITAL_WRITE_BODY \
+  if(val) {                \
+    GPOS = (1 << pin);     \
+  } else {                 \
+    GPOC = (1 << pin);     \
+  }
+#define DIGITAL_READ_BODY return (GPI >> pin) & 0x1;
+#define DIGITAL_TOGGLE_BODY               \
+  if(GPI & (1 << pin)) GPOC = (1 << pin); \
+  else GPOS = (1 << pin);
+#endif
 
   template<uint8_t pin, bool val>
   inline void __attribute__((always_inline)) WritePin() { DIGITAL_WRITE_BODY }
@@ -52,24 +65,4 @@ namespace avp {
   template<uint8_t pin>
   inline void __attribute__((always_inline)) ClearPin() { WritePin<pin, 0>(); }
   inline void __attribute__((always_inline)) ClearPin(uint8_t pin) { WritePin(pin, 0); }
-
-#endif
-#ifdef ESP8266
-  inline void __attribute__((always_inline)) WritePin(uint8_t pin, uint8_t val) {
-    if(val) {
-      GPOS = (1 << pin); // Write 1 to Set register
-    } else {
-      GPOC = (1 << pin); // Write 1 to Clear register
-    }
-  }
-
-  inline uint8_t __attribute__((always_inline)) ReadPin(uint8_t pin) {
-    return (GPI >> pin) & 0x1; // Read Input register
-  }
-
-  inline void __attribute__((always_inline)) TogglePin(int pin) {
-    if(GPI & (1 << pin)) GPOC = (1 << pin);
-    else GPOS = (1 << pin);
-  }
-#endif
 } // namespace avp
