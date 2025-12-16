@@ -99,14 +99,14 @@ namespace avp {
                   "Available URL commands are (used as <b>http://");
         Resp += Name;
         Resp += F("/</b><em>command</em>):<ol>"
-                  "<li> nothing - outputs this screen</li>"
-                  "<li> pin?i=n - return pin n settings</li>"
-                  "<li> pin?i=n[&set=(0|1)] - set pin value</li>"
-                  "<li> pin?i=n[&mode=(0|1)] - set pin mode</li>"
-                  "<li> config?ssid=<em>string</em>&pass=<em>string</em></li>"
-                  "<li> log - outputs debug log</li>"
-                  "<li> update - update firmware</li>"
-                  "<li> reset - reboots MCU</li>");
+                  "<li> <em>nothing</em> - outputs this screen</li>"
+                  "<li> <em>pin?i=n</em> - return pin n settings</li>"
+                  "<li> <em>pin?i=n[&set=(0|1)]</em> - set pin value</li>"
+                  "<li> <em>pin?i=n[&mode=(0|1)]</em> - set pin mode</li>"
+                  "<li> <em>config?ssid=</em>......<em>&pass=</em>......</li>"
+                  "<li> <em>log</em> - outputs debug log</li>"
+                  "<li> <em>update</em> - update firmware</li>"
+                  "<li> <em>reset</em> - reboots MCU</li>");
         Resp += Options.AddUsage;
         Resp += ShowWiFiAndEntry();
         Resp += "</html>";
