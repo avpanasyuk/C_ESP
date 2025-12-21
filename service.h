@@ -60,4 +60,15 @@ namespace avp {
       }
     } // Add
   }; // class Log
+
+  /**
+   * @brief finds AP with best BSSID
+   * 
+   * @param SSID
+   * @param BSSID_out - array uint8_t[6] were result is stored
+   * @return true - found at least one AP
+   * @return false - did not find any APs
+   */
+  bool FindBestAP(const char *SSID, uint8_t *BSSID_out);
+
 } // namespace avp

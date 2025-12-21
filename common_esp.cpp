@@ -1,3 +1,8 @@
+#include <Arduino.h>
+#ifdef ESP8266
+#include "ESP8266WiFi.h"
+#endif
+#include "C_General/General.hpp"
 #include "service.h"
 
 Ticker SoftTimer;
@@ -26,4 +31,29 @@ namespace avp {
 #endif
     return out;
   } // GenerateHTML
+
+  bool FindBestAP(const char *SSID, uint8_t *BSSID_out) {
+    avp::ReleaseWhenOutOfScope<int> n(
+#if defined(ESP8266)
+      WiFi.scanNetworks(false, false, 0, (uint8_t *)SSID),
+#else
+      WiFi.scanNetworks(false, false, false, 300U, 0, SSID, nullptr),
+#endif
+      [](int) {
+        WiFi.scanDelete();
+      });
+
+    int BestRSSI_i = -1;
+    int32_t BestRSSI = INT32_MIN;
+
+    for(int i = 0; i < n; ++i) {
+      uint8_t *BSSID = WiFi.BSSID(i);
+      debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+      if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
+    }
+    memcpy(BSSID_out, WiFi.BSSID(BestRSSI_i), 6);
+
+    return BestRSSI_i != -1;
+  } // FindBestAP
+
 } // namespace avp

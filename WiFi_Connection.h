@@ -204,9 +204,7 @@ namespace avp {
         : WiFi_Connection(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_) {}
 
     void ConnectToBestAP(const char *SSID, const char *Pass) {
-      const uint8_t *pBSSID = FindBestAP(SSID);
-      if(pBSSID != nullptr) {
-        memcpy(BSSID, FindBestAP(SSID), sizeof(BSSID));
+      if(FindBestAP(SSID, BSSID)) {
         debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
         WiFi.mode(WIFI_STA);
         if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
@@ -221,29 +219,6 @@ namespace avp {
         open_AP();
       } // defaults are not present or do not work, go to AP mode
     } // ConnectToBestAP
-
-    const uint8_t *FindBestAP(const char *Name) {
-      avp::ReleaseWhenOutOfScope<int> n(
-#if defined(ESP8266)
-        WiFi.scanNetworks(false, false, 0, (uint8_t *)Name),
-#else
-        WiFi.scanNetworks(false, false, false, 300U, 0, Name, nullptr),
-#endif
-        [](int) {
-          WiFi.scanDelete();
-        });
-
-      int BestRSSI_i = -1;
-      int32_t BestRSSI = INT32_MIN;
-
-      for(int i = 0; i < n; ++i) {
-        uint8_t *BSSID = WiFi.BSSID(i);
-        debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
-        if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
-      }
-
-      return BestRSSI_i == -1 ? nullptr : WiFi.BSSID(BestRSSI_i);
-    } // FindBestAP
 
     void open_AP() {
       WiFi.mode(WIFI_AP);
