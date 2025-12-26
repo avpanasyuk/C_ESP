@@ -1,15 +1,8 @@
 #pragma once
 
 #include <Arduino.h>
-#include <Ticker.h>
-#include <WString.h>
-#include <memory>
 #include <stdint.h>
-#include <string.h>
 #include "C_ARDUINO/General.h"
-
-
-extern Ticker SoftTimer;
 
 namespace avp {
   // ***************** INTERNET CLIENT CONNECTION
@@ -24,51 +17,62 @@ namespace avp {
    * @note there is a 0 at the end of filled string, so it can be used as a C string
    */
   class Log {
-    std::unique_ptr<char[]> Text;
+    char *const Text;
     const int Sz; // max string length not counting trailing 0
     const char *const Br;
     const int BrL;
 
   public:
     Log(size_t size, const char *Break = "<br>")
-        : Text{std::make_unique<char[]>(size + 1)}, Sz(size), Br(Break), BrL(strlen(Break)) {
-      *Text.get() = 0;
+        : Text(new char[size + 1]), Sz(size), Br(Break), BrL(strlen(Break)) {
+      *Text = 0;
     } // constructor
 
-    const char *Get() const { return Text.get(); }
+    ~Log() { delete[] Text; }
 
-    void Add(const char *s, bool NoBreak = false) {
-      int N = strlen(s);
-      int Length = strlen(Text.get());
-      int SpaceForBreak = NoBreak ? 0 : BrL;
+      const char *Get() const { return Text; }
 
-      if (N + SpaceForBreak > Sz) Add("New entry is too big!");
-      else {
-        int Shift = Length + N + SpaceForBreak - Sz; // new string does not fit, how much I have to shift log up
-        char *p = Text.get();
+      void Add(const char *s, bool NoBreak = false) {
+        int N = strlen(s);
+        int Length = strlen(Text);
+        int SpaceForBreak = NoBreak ? 0 : BrL;
 
-        if (Shift > 0) {                                    // overran, got to shift
-          const char *pBr = strstr(Text.get() + Shift, Br); // find next break after Shift
+        if(N + SpaceForBreak > Sz) Add("New entry is too big!");
+        else {
+          int Shift = Length + N + SpaceForBreak - Sz; // new string does not fit, how much I have to shift log up
+          char *p = Text;
 
-          if (pBr != nullptr) {
-            pBr += BrL; // step over the last break, we do not need to copy it
-            for (; *pBr != 0; ++p, ++pBr) *p = *pBr; // shift buffer
-          }
-        } else p += Length; // no shift, just step over the end of the string
-        strcpy(p, s);
-        if (!NoBreak) strcpy(p + N, Br);
-      }
-    } // Add
-  }; // class Log
+          if(Shift > 0) {                               // overran, got to shift
+            const char *pBr = strstr(Text + Shift, Br); // find next break after Shift
 
-  /**
-   * @brief finds AP with best BSSID
-   * 
-   * @param SSID
-   * @param BSSID_out - array uint8_t[6] were result is stored
-   * @return true - found at least one AP
-   * @return false - did not find any APs
-   */
-  bool FindBestAP(const char *SSID, uint8_t *BSSID_out);
+            if(pBr != nullptr) {
+              pBr += BrL;                             // step over the last break, we do not need to copy it
+              for(; *pBr != 0; ++p, ++pBr) *p = *pBr; // shift buffer
+            }
+          } else p += Length; // no shift, just step over the end of the string
+          strcpy(p, s);
+          if(!NoBreak) strcpy(p + N, Br);
+        }
+      } // Add
+    }; // class Log
 
-} // namespace avp
+    /**
+     * @brief finds AP with best BSSID
+     *
+     * @param SSID
+     * @param BSSID_out - array uint8_t[6] were result is stored
+     * @return true - found at least one AP
+     * @return false - did not find any APs
+     */
+    bool FindBestAP(const char *SSID, uint8_t *BSSID_out);
+
+    /**
+     * @brief Finds best AP and connects
+     *
+     * @param SSID
+     * @param PWD
+     * @return true is succeded
+     */
+    bool TryToConnectWiFi(const char *SSID, const char *PWD);
+
+  } // namespace avp

@@ -41,7 +41,8 @@ namespace avp {
       enum class Response_t : int {
         OK = 200,
         NOT_FOUND = 404,
-        INTERNAL_SERVER_ERROR = 500
+        INTERNAL_SERVER_ERROR = 500,
+        REDIRECT = 303
       };
     };
 

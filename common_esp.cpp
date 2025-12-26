@@ -2,14 +2,16 @@
 #ifdef ESP8266
 #include "ESP8266WiFi.h"
 #endif
+#ifdef ESP32
+#include "WiFi.h"
+#endif
 #include "C_General/General.hpp"
-#include "service.h"
+#include "C_ESP/service.h"
 
-Ticker SoftTimer;
 namespace avp {
   const String &GenerateHTML(const char *html_body, uint16_t AutoRefresh_s, const char *title) {
     static String out;
-    if(!out) out.reserve(6000);
+    if(!out) out.reserve(200);
     out.clear();
     out += F("<!DOCTYPE html><html><head>");
     if(title != nullptr) {
@@ -56,4 +58,16 @@ namespace avp {
     return BestRSSI_i != -1;
   } // FindBestAP
 
+  bool TryToConnectWiFi(const char *SSID, const char *PWD) {
+    uint8_t BSSID_out[6];
+    if(!FindBestAP(SSID, BSSID_out)) return false; // until there is WiFi nothing to be done
+    // Keep your WiFi and OTA setup
+    WiFi.mode(WIFI_STA);
+#ifdef NAME
+    WiFi.setHostname(NAME);
+#endif
+    WiFi.begin(SSID, PWD, 0, BSSID_out);
+    WiFi.waitForConnectResult(20000UL);
+    return WiFi.isConnected();
+  }
 } // namespace avp

@@ -39,7 +39,7 @@ static const char *LittleFS_AUTH = "/net_auth.txt";
 #include "../C_General/Error.h"
 #include "../C_General/millis_micros.hpp"
 #include "../C_General/MyTime.hpp"
-#include "fast_gpio.hpp"
+#include "hw_timer.hpp"
 #include "service.h"
 
 namespace avp {
@@ -51,9 +51,8 @@ namespace avp {
       CONNECTED
     } ConnStatus; // static so it can be reached from an interrupt
 
-    // typedef std::function<void(enum Status_t)> status_indication_func_t;
-    typedef void (*status_indication_func_t)(Status_t);
-    static void idle(Status_t){};
+    typedef void (*status_indication_func_t)(); ///< should be declared IRAM_ATTR
+    static void idle(){};
 
     struct Options_t {
       const char *Name;                                 ///< name of the device as seen by DNS
@@ -77,40 +76,15 @@ namespace avp {
 #else
     template<int LEDpin>
 #endif
-    static void BlinkerFunc(Status_t ConnStatus) {
-      static int Counter = 0;
-
-      switch(ConnStatus) {
-      case Status_t::IDLE:
-        avp::SetPin<LEDpin>(); // LED off
-        break;
-      case Status_t::TRYING_TO_CONNECT:
-        if(++Counter > 1) {
-          Counter = 0;
-          avp::TogglePin<LEDpin>(); 
-        }
-        break;
-      case Status_t::AP_MODE:
-        if(++Counter > 4) {
-          Counter = 0;
-          avp::TogglePin<LEDpin>(); 
-        }
-        break;
-      case Status_t::CONNECTED:
-        avp::ClearPin<LEDpin>(); // LED on
-        break;
-      } // switch (Stat)
-    } // BlinkerFunc
-
     static constexpr uint8_t STR_SIZE = 32; ///< ssid and password string sizes
   protected:
     IPAddress ip;
     const char *Name;
     String ssid, pass;
-    status_indication_func_t status_indication_func;
+    static status_indication_func_t status_indication_func;
     uint8_t BSSID[6]; ///< BSSID of the best AP
 
-    void Timer100msCallback() { status_indication_func(ConnStatus); } // Timer100msCallback
+    static void IRAM_ATTR Timer100msCallback() { status_indication_func(ConnStatus); } // Timer100msCallback
 
   public:
     /**
@@ -285,6 +259,7 @@ namespace avp {
     virtual void call_in_loop() {
       static avp::TimePeriod1<10UL * 60 * 1000, millis> TP;
       if(TP.Expired()) TryToConnect(); // try to connect every 10 minutes
+
 
 #if defined(DO_OTA) && DO_OTA
       ArduinoOTA.handle();
