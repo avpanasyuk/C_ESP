@@ -33,10 +33,10 @@ namespace avp {
 #ifdef ESP32
     static constexpr uint16_t Divider = TIMER_BASE_CLK / 1000000UL /* hw clock in us */;
 
-    static const inline hw_timer_t *ptimer{timerBegin(HWidx, Divider, false)}; //  last false is for counting down, easier
+    static inline hw_timer_t * const ptimer{timerBegin(HWidx, Divider, false)}; //  last false is for counting down, easier
 #endif
 
-    static class Timer_t {
+    static inline class Timer_t {
       std::atomic<uint32_t> CurrentTick; /* one tick takes one ms */
       friend class HW_Timer_ms<HWidx>;
 
@@ -58,7 +58,7 @@ namespace avp {
     } // onHW_Interrupt
 
   public:
-    static void Begin() {
+    static void begin() {
       if(!Beginned) {
 #ifdef ESP32
 

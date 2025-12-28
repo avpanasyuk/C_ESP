@@ -56,7 +56,7 @@ namespace avp {
 
   template<uint8_t pin>
   inline void __attribute__((always_inline)) TogglePin() { DIGITAL_TOGGLE_BODY }
-  inline void __attribute__((always_inline)) TogglePin(int pin) { DIGITAL_TOGGLE_BODY }
+  inline void __attribute__((always_inline)) TogglePin(uint8_t pin) { DIGITAL_TOGGLE_BODY }
 
   template<uint8_t pin>
   inline void __attribute__((always_inline)) SetPin() { WritePin<pin, 1>(); }
