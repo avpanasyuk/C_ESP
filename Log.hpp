@@ -20,18 +20,22 @@ namespace avp {
 
   public:
     static void begin(size_t size, const char *Break = "<br>") {
-      AVP_ASSERT(Text == nullptr);
-      Text = new char[size + 1];
+      AVP_ASSERT(Text == nullptr); // to prevent from being called twice
+     // should set all this stuff before assigning Text value
       Sz = size;
       Br = Break;
       BrL = strlen(Break);
-      Text[0] = 0;
+
+      PAUSE_INTERRUPTS
+      (Text = new char[size + 1])[0] = 0;
     } // begin
 
     static const char *Get() {
       AVP_ASSERT(Text != nullptr);
       return Text;
     }
+
+    static bool IsOpen() { return Text != nullptr; }
 
     static void Add(const char *s, bool NoBreak = false) {
       AVP_ASSERT(Text != nullptr);

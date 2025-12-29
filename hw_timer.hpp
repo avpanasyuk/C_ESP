@@ -24,9 +24,10 @@ namespace avp {
    * up to a number MaxNumOfTimers
    * @tparam HWidx: index of hardware timer to use
    */
-  template<uint8_t HWidx = 0>
+  template<uint8_t HWidx = 1>  // avoid timer 0
   class HW_Timer_ms { // counts milliseconds
-    static_assert(HWidx < NUM_HW_TIMERS, "Wrong hardware timer index!");
+   static_assert(HWidx != 0, "Can be used by ESP32!");
+   static_assert(HWidx < NUM_HW_TIMERS, "Wrong hardware timer index!");
 
     static constexpr uint8_t MaxNumOfTimers = 10; // I do not want to put it into template parameters,
 // as it would make it possible to generate several different HW_Timer_us with the same HWidx
@@ -42,7 +43,7 @@ namespace avp {
 
     public:
       uint32_t Period_ticks;
-      void (*fn)();
+      bool (*fn)(); // if function returns true counter restarts
     } Timer[MaxNumOfTimers];
 
     static inline uint8_t NumTimers = 0; ///< number of created SW timers
@@ -50,10 +51,8 @@ namespace avp {
 
     static void IRAM_ATTR onHW_Interrupt() {
       for(uint8_t TimerI = 0; TimerI < NumTimers; ++TimerI) {
-        if(!--Timer[TimerI].CurrentTick) {
-          Timer[TimerI].CurrentTick = Timer[TimerI].Period_ticks;
-          if(Timer[TimerI].fn != nullptr) Timer[TimerI].fn();
-        }
+        if(Timer[TimerI].CurrentTick > 0) --Timer[TimerI].CurrentTick;
+        else if(Timer[TimerI].fn != nullptr && Timer[TimerI].fn()) Timer[TimerI].CurrentTick = Timer[TimerI].Period_ticks;
       }
     } // onHW_Interrupt
 
@@ -61,7 +60,6 @@ namespace avp {
     static void begin() {
       if(!Beginned) {
 #ifdef ESP32
-
         timerAttachInterrupt(ptimer, onHW_Interrupt, true); // attaches interrupt handler, true = edge trigger, does not matter
         // Set alarm value: timer, value, autoreload
         timerAlarmWrite(ptimer, 1000 /* ms */, true); // set count to trigger the interrupt and autoload
@@ -84,15 +82,15 @@ namespace avp {
       }
     } // Begin
     /// @brief  Attaches another timer counter to a hardware timer
-    /// @param callback_fn -  should be declared IRAM_ATTR
+    /// @param callback_fn -  should be declared IRAM_ATTR, if it returns true counter restarts
     /// @param Period_ms
     /// @return reference Timer_t, Period_ticks and fn can be accessed, setting fn to nullptr
     ///         stops timer
-    static Timer_t &CreateTimer(void (*callback_fn)(), uint32_t Period_ms) {
+    static Timer_t &CreateTimer(bool (*callback_fn)(), uint32_t Period_ms) {
       AVP_ASSERT(Beginned);
       AVP_ASSERT(Period_ms > 0);
       AVP_ASSERT(NumTimers < MaxNumOfTimers);
-      Timer[NumTimers].Period_ticks = Period_ms;
+      Timer[NumTimers].CurrentTick = Timer[NumTimers].Period_ticks = Period_ms;
       Timer[NumTimers].fn = callback_fn;
 
       return Timer[NumTimers++];

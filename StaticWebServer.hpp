@@ -33,11 +33,11 @@ namespace avp {
 
   /**
    * @brief This is interface class for static Sync WebServer
-  */
+   */
   class StaticWebServer : public StaticWiFi_Conn {
+  public:
     static inline ::WebServer s;
 
-  public:
     struct HTTP {
       enum class Response_t : int {
         OK = 200,
@@ -53,17 +53,17 @@ namespace avp {
       int LogSize;         ///< size of the log buffer
     } Options;             // Options_t
 
-    static const Options_t &DefaultOpts() { 
+    static const Options_t &DefaultOpts() {
       static Options_t Opts;
       *(StaticWiFi_Conn::Options_t *)&Opts = StaticWiFi_Conn::DefaultOpts();
       Opts.Version = "0.0";
       Opts.AddUsage = "";
       Opts.LogSize = 2000;
       return Opts;
-    }  // DefaultOpts
+    } // DefaultOpts
 
-    static void call_in_loop() { 
-      StaticWiFi_Conn::call_in_loop(); 
+    static void call_in_loop() {
+      StaticWiFi_Conn::call_in_loop();
       s.handleClient();
     };
 
@@ -76,31 +76,30 @@ namespace avp {
       size_t contentLength, HTTP::Response_t code = HTTP::Response_t::OK) {
       s.send_P(int(code), content_type, (const char *)content, contentLength);
     }
-    static bool hasArg(const String &name) { return s.hasArg(name); }
-    static int args() { return s.args(); }
-    static const String arg(const String &name) { return s.arg(name); };
-    static void sendHeader(const String &name, const String &value, bool first = false) {
-      s.sendHeader(name, value, first);
-    }
-    static HTTPUpload &upload() { return s.upload(); }
-    static WiFiClient client() { return s.client(); }
-    static void sendContent(const String &content) { s.sendContent(content); }
+    // static bool hasArg(const String &name) { return s.hasArg(name); }
+    // static int args() { return s.args(); }
+    // static const String arg(const String &name) { return s.arg(name); };
+    // static void sendHeader(const String &name, const String &value, bool first = false) {
+    //   s.sendHeader(name, value, first);
+    // }
+    // static HTTPUpload &upload() { return s.upload(); }
+    // static WiFiClient client() { return s.client(); }
+    // static void sendContent(const String &content) { s.sendContent(content); }
 
     // ----------------- callbacks registration ---------------------------
-    static void on(const Uri &uri, WebServer::THandlerFunction fn, HTTPMethod method = HTTP_GET) {
+    static inline void on(const Uri &uri, WebServer::THandlerFunction fn, HTTPMethod method = HTTP_GET) {
       s.on(uri, method, fn);
     }
 
-    static void on(const Uri &uri, WebServer::THandlerFunction fn, WebServer::THandlerFunction ufn, HTTPMethod method = HTTP_PUT) {
+    static inline void on(const Uri &uri, WebServer::THandlerFunction fn, WebServer::THandlerFunction ufn, HTTPMethod method = HTTP_PUT) {
       s.on(uri, method, fn, ufn);
     }
-    
 
     static void begin(const Options_t &Opts = DefaultOpts()) {
       Options = Opts;
-      StaticWiFi_Conn::begin(Opts);
       Log::begin(Options.LogSize);
-  
+      StaticWiFi_Conn::begin(Opts);
+      
       on("/", []() {
         static String Resp;
         Resp.reserve(200);
@@ -187,11 +186,10 @@ namespace avp {
 
       on("/upload", []() {
         // auto &syncReq = static_cast<SyncWebServer::Request_t &>(rReq);
-        //s.sendHeader("Connection", "close");
+        // s.sendHeader("Connection", "close");
         send("text/plain", (Update.hasError()) ? "FAIL" : "OK");
-      },
-        []() {
-        HTTPUpload &upload =s.upload();
+      }, []() {
+        HTTPUpload &upload = s.upload();
 
         if(upload.status == UPLOAD_FILE_START) {
           debug_printf("Update: %s\n", upload.filename.c_str());
@@ -222,27 +220,28 @@ namespace avp {
             Update.end();
             send("text/plain", "Update aborted.", HTTP::Response_t::INTERNAL_SERVER_ERROR);
           }
-        });
+        }
+      );
 
-        s.begin();
+      s.begin();
     } // begin
 
     static const String &ShowWiFiAndEntry() {
-      static String Resp;
-      Resp.reserve(200);
+        static String Resp;
+        Resp.reserve(200);
 
-      Resp = F("</ol></p><p><b>WiFi networks:</b></p>");
-      Resp += "<p>";
-      Resp += scan();
-      Resp += F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' length=");
-      Resp += STR_SIZE - 1;
-      Resp += " value='";
-      Resp += WiFi.SSID();
-      Resp += "'><input name='pass' length=";
-      Resp += STR_SIZE - 1;
-      Resp += "><input type='submit'></html>";
+        Resp = F("</ol></p><p><b>WiFi networks:</b></p>");
+        Resp += "<p>";
+        Resp += scan();
+        Resp += F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' length=");
+        Resp += STR_SIZE - 1;
+        Resp += " value='";
+        Resp += WiFi.SSID();
+        Resp += "'><input name='pass' length=";
+        Resp += STR_SIZE - 1;
+        Resp += "><input type='submit'></html>";
 
-      return Resp;
+        return Resp;
     } // ShowWiFiAndEntry
-  }; // class StaticWebServer
-} // namespace avp
+    }; // class StaticWebServer
+  } // namespace avp

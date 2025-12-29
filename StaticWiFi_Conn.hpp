@@ -62,7 +62,7 @@ namespace avp {
 #else
     template<uint8_t LED_Pin>
 #endif
-    static void IRAM_ATTR Blinken() {
+    static void IRAM_ATTR Blinken() { // should be run once in 200 ms or so
       static int Counter = 0;
 
       switch(ConnStatus) {
@@ -131,12 +131,8 @@ namespace avp {
       pass = default_pass;
       status_indication_func = status_indication_func_;
 
-      HW_Timer_ms<>::begin();
-      HW_Timer_ms<>::CreateTimer(status_indication_func, 100);
-
       WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
                                   // connect to the one with the best RSSI
-
       // but if I have some stored credentials use them instead of default ones
 #ifdef ESP32
       LittleFS.begin(true);
@@ -144,7 +140,6 @@ namespace avp {
 #ifdef ESP8266
       LittleFS.begin();
 #endif
-
       if(LittleFS.exists(LittleFS_AUTH)) {
         File f = LittleFS.open(LittleFS_AUTH, "r");
         if(f) {
@@ -153,13 +148,12 @@ namespace avp {
           debug_printf("Stored credentials: %s, %s\n", ssid.c_str(), pass.c_str());
         } else debug_puts("Failed to open stored credentials file!\n");
       } else debug_puts("No stored credentials found!\n");
-
       if(ssid == "") open_AP();
       else ConnectToBestAP(ssid.c_str(), pass.c_str());
 
       MDNS.begin(Name);
 
-#if defined(DO_OTA) && DO_OTA
+      #if defined(DO_OTA) && DO_OTA
       ArduinoOTA.setHostname(Name);
 
       ArduinoOTA.onStart([]() {
@@ -171,7 +165,7 @@ namespace avp {
         WiFi.setSleepMode(WIFI_NONE_SLEEP);
 #endif
         delay(100);
-
+        DEBUG_LINE_NUM
         OTA_IsInProgress = true;
       });
       ArduinoOTA.onEnd([]() {
