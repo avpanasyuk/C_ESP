@@ -24,32 +24,48 @@ namespace avp {
    * up to a number MaxNumOfTimers
    * @tparam HWidx: index of hardware timer to use
    */
-  template<uint8_t HWidx = 1, uint16 Divider = TIMER_BASE_CLK / 10000UL > // avoid timer 0. hw clock 100 us, we need alarm_value in timerAlarmWrite
-    // to be higher than 1 with a margin, 10 seems ok
-  class HW_Timer_ms {         // counts milliseconds
-    static_assert(HWidx != 0, "Can be used by ESP32!");
+  template<uint8_t HWidx = 1, uint16_t Divider = TIMER_BASE_CLK / 10000UL> // avoid timer 0. hw clock 100 us, we need alarm_value in timerAlarmWrite
+                                                                           // to be higher than 1 with a margin, 10 seems ok
+  class HW_Timer_ms {                                                      // counts milliseconds
+    static_assert(HWidx != 0, "Used by FreeRTOS, do not mess!");
     static_assert(HWidx < NUM_HW_TIMERS, "Wrong hardware timer index!");
 
     static constexpr uint8_t MaxNumOfTimers = 10; // I do not want to put it into template parameters,
-// as it would make it possible to generate several different HW_Timer_us with the same HWidx
-#ifdef ESP32
- 
-    static inline hw_timer_t *const ptimer{timerBegin(HWidx, Divider, false)}; //  last false is for counting down, easier
-#endif
+    // as it would make it possible to generate several different HW_Timer_us with the same HWidx
+  public:
+    static inline class Timer_t {
+      std::atomic<int32_t> CurrentTick; /* one tick takes one ms */
+      /** @note timer and gpio interrupt have the same priority so do not interrupt each other
+       * and I do not need mutexes. But as soon as there is a risk of interrupt triggered when
+       * I am changing CurrentTick on foreground I will need one.
+       */
+      friend class HW_Timer_ms<HWidx>;
+      uint32_t Period_ticks; ///< set to 0 to disable timer
+      bool (*fn)(); // if function returns true counter restarts
 
-    static inline uint8_t NumTimers = 0; ///< number of created SW timers
-    static inline bool Beginned = false;
+    public:
+      void IRAM_ATTR Start() { CurrentTick = Period_ticks - 1; }
+      void IRAM_ATTR Stop() { CurrentTick = -1; }
+    } Timer[MaxNumOfTimers];
+
+  private:
+    static inline uint8_t NumTimers; ///< number of created SW timers
 
     static void IRAM_ATTR onHW_Interrupt() {
-      for(uint8_t TimerI = 0; TimerI < NumTimers; ++TimerI) {
-        if(Timer[TimerI].CurrentTick > 0) --Timer[TimerI].CurrentTick;
-        else if(Timer[TimerI].fn != nullptr && Timer[TimerI].fn()) Timer[TimerI].CurrentTick = Timer[TimerI].Period_ticks;
+      for(uint_fast8_t TimerI = 0; TimerI < NumTimers; ++TimerI) {
+        if(Timer[TimerI].CurrentTick < 0) continue;
+        if(Timer[TimerI].CurrentTick == 0) {
+          if(Timer[TimerI].fn != nullptr && Timer[TimerI].fn()) Timer[TimerI].Start();
+        } else --Timer[TimerI].CurrentTick;
       }
     } // onHW_Interrupt
 
     static void begin() {
-      if(!Beginned) {
+      static bool Begun = false; ///< makes sure I do it once only
+      if(!Begun) {
+        NumTimers = 0;
 #ifdef ESP32
+        static hw_timer_t *ptimer = timerBegin(HWidx, Divider, false);
         timerAttachInterrupt(ptimer, onHW_Interrupt, true); // attaches interrupt handler, true = edge trigger, does not matter
         // Set alarm value: timer, value, autoreload
         timerAlarmWrite(ptimer, 10 /* ms */, true); // set count to trigger the interrupt and autoload
@@ -68,38 +84,23 @@ namespace avp {
         timer1_write(TIMER_BASE_CLK / 256 / 1000 /* to make 1 ms ticks */);
 
 #endif
-        Beginned = true;
+        Begun = true;
       }
-    } // Begin
+    } // begin
 
   public:
-    static inline class Timer_t {
-      std::atomic<uint32_t> CurrentTick; /* one tick takes one ms */
-      /** @note timer and gpio interrupt have the same priority so do not interrupt each other
-       * and I do not need mutexes. But as soon as there is a risk of interrupt triggered when
-       * I am changing CurrentTick on foreground I will need one.
-      */
-      friend class HW_Timer_ms<HWidx>;
-      uint32_t Period_ticks;
-      bool (*fn)(); // if function returns true counter restarts
-
-    public:
-      void Start() { CurrentTick = Period_ticks; }
-      void Stop() { CurrentTick = 0; }
-    } Timer[MaxNumOfTimers];
-
     /// @brief  Attaches another timer counter to a hardware timer
     /// @param callback_fn -  should be declared IRAM_ATTR, if it returns true counter restarts
-    /// @param Period_ms
+    /// @param Period_ms - if 0 timer is disabled
     /// @return reference Timer_t, Period_ticks and fn can be accessed, setting fn to nullptr
     ///         stops timer
-    static Timer_t &CreateTimer(bool (*callback_fn)(), uint32_t Period_ms, bool Started = false) {
+    static Timer_t &CreateTimer(bool (*callback_fn)(), uint32_t Period_ms, bool DoStart = false) {
       begin();
-      AVP_ASSERT(Period_ms > 0);
       AVP_ASSERT(NumTimers < MaxNumOfTimers);
       Timer[NumTimers].Period_ticks = Period_ms;
       Timer[NumTimers].fn = callback_fn;
-      if(Started) Timer[NumTimers].Start();
+      if(DoStart) Timer[NumTimers].Start();
+      else Timer[NumTimers].Stop();
 
       return Timer[NumTimers++];
     } // CreateTimer
