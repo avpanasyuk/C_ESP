@@ -67,8 +67,9 @@ namespace avp {
         NumTimers = 0;
 #ifdef ESP32
         hw_timer_t *ptimer = timerBegin(HWidx, Divider, true); //!!!!!!! NEVER EVER SET COUNT DOWN 
-        timerAttachInterrupt(ptimer, onHW_Interrupt, false); // attaches interrupt handler, true = edge trigger, does not matter
+        timerAttachInterrupt(ptimer, onHW_Interrupt, true); // attaches interrupt handler, true = edge trigger, does not matter
         timerAlarmWrite(ptimer, 10 /* 1 ms */, true); // set count to trigger the interrupt and autoload
+        yield(); // go to be here for some reason
         timerAlarmEnable(ptimer);
 #endif
 #ifdef ESP8266

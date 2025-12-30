@@ -33,8 +33,6 @@ namespace avp {
       return Text;
     }
 
-    static bool IsOpen() { return Text != nullptr; }
-
     static void Add(const char *s, bool NoBreak = false) {
       if(Text == nullptr) begin();
       size_t N = strlen(s);
