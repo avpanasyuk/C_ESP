@@ -13,39 +13,37 @@
 
 namespace avp {
   class Log {
+    static constexpr size_t DefaultSize = 2000;
     static inline char *Text{nullptr};
-    static inline int Sz; // max string length not counting trailing 0
+    static inline size_t Sz; // max string length not counting trailing 0
     static inline const char *Br;
     static inline int BrL;
 
   public:
-    static void begin(size_t size, const char *Break = "<br>") {
-      AVP_ASSERT(Text == nullptr); // to prevent from being called twice
+    static void begin(size_t size = DefaultSize, const char *Break = "<br>") {
      // should set all this stuff before assigning Text value
-      Sz = size;
-      Br = Break;
-      BrL = strlen(Break);
-
-      PAUSE_INTERRUPTS
-      (Text = new char[size + 1])[0] = 0;
+     Br = Break;
+     BrL = strlen(Break);
+     if(Text == nullptr) Text = (char *)malloc(Sz = size);
+      else if(Sz != size)  Text = (char *)realloc(Text, Sz = size);
     } // begin
 
     static const char *Get() {
-      AVP_ASSERT(Text != nullptr);
+      if(Text == nullptr) begin();
       return Text;
     }
 
     static bool IsOpen() { return Text != nullptr; }
 
     static void Add(const char *s, bool NoBreak = false) {
-      AVP_ASSERT(Text != nullptr);
-      int N = strlen(s);
-      int Length = strlen(Text);
+      if(Text == nullptr) begin();
+      size_t N = strlen(s);
+      size_t Length = strlen(Text);
       int SpaceForBreak = NoBreak ? 0 : BrL;
 
       if(N + SpaceForBreak > Sz) Add("New entry is too big!");
       else {
-        int Shift = Length + N + SpaceForBreak - Sz; // new string does not fit, how much I have to shift log up
+        size_t Shift = Length + N + SpaceForBreak - Sz; // new string does not fit, how much I have to shift log up
         char *p = Text;
 
         if(Shift > 0) {                               // overran, got to shift

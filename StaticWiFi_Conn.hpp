@@ -122,7 +122,7 @@ namespace avp {
      */
     static void begin(const char *Name_, const char *default_ssid, const char *default_pass,
       status_indication_func_t status_indication_func_ = idle) {
-      AVP_ASSERT(ConnStatus == Status_t::BEFORE_BEGIN); // make sure we run begin once only
+      if(ConnStatus != Status_t::BEFORE_BEGIN) return; // make sure we run begin once only
 
       ConnStatus = Status_t::IDLE;
       OTA_IsInProgress = false;
@@ -188,6 +188,7 @@ namespace avp {
       });
       ArduinoOTA.begin();
 #endif
+    
     } // constructor
 
     static void begin(const Options_t &Opts = DefaultOpts()) {
