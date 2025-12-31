@@ -6,6 +6,7 @@
 #include "WiFi.h"
 #endif
 #include "C_General/General.hpp"
+#include "C_General/Error.hpp"
 #include "C_ESP/service.h"
 
 namespace avp {
