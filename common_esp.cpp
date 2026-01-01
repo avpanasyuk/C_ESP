@@ -5,6 +5,7 @@
 #ifdef ESP32
 #include "WiFi.h"
 #endif
+#include <HTTPClient.h>
 #include "C_General/General.hpp"
 #include "C_General/Error.hpp"
 #include "C_ESP/service.h"
@@ -71,4 +72,16 @@ namespace avp {
     WiFi.waitForConnectResult(20000UL);
     return WiFi.isConnected();
   }
+
+ const char *HTTP_POST_puts(const char *URL, const char *s) {
+    HTTPClient http;
+    http.begin(URL);
+    http.addHeader("Content-Type", "text/plain");
+
+    int httpCode = http.POST((uint8_t *)s, strlen(s));
+    http.end();
+
+    if(httpCode != 200) return sprintf_static("Wrong response code %d!", httpCode);
+     return nullptr;
+  } // HTTP_POST_puts
 } // namespace avp

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <Arduino.h>
+#include <stdarg.h>
 #include <stdint.h>
+#include <Arduino.h>
 
 namespace avp {
   // ***************** INTERNET CLIENT CONNECTION
@@ -26,6 +27,15 @@ namespace avp {
    * @return true is succeded
    */
   bool TryToConnectWiFi(const char *SSID, const char *PWD);
+
+  /**
+   * @brief to be used with csv_logging_server.py
+   *
+   * @param URL: like "http://192.168.1.100:8000/update"
+   * @param s: csv string, first entry is the name of file to store
+   * @return nullptr is succeded, error message if not.
+   */
+  const char *HTTP_POST_puts(const char *URL, const char *s);
 } // namespace avp
 
 // following is much fatser than Arduino "NoInterrupts".
@@ -35,4 +45,3 @@ namespace avp {
     _t() { asm volatile("rsil %0, 15" : "=r"(state)); } \
     ~_t() { asm volatile("wsr %0, ps" ::"r"(state)); }  \
   } _;
-  
