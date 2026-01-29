@@ -35,6 +35,7 @@ namespace avp {
    * @param s: csv string, first entry is the name of file to store
    * @return nullptr is succeded, error message if not.
    */
+  const char *HTTP_POST_puts(const char *URL, const char *s, size_t sz);
   const char *HTTP_POST_puts(const char *URL, const char *s);
 } // namespace avp
 

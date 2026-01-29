@@ -73,15 +73,27 @@ namespace avp {
     return WiFi.isConnected();
   }
 
- const char *HTTP_POST_puts(const char *URL, const char *s) {
-    HTTPClient http;
+  const char *HTTP_POST_puts(const char *URL, const char *s, size_t sz) {
+    static HTTPClient http;
+    static const char *OldURL{nullptr};
+    
+    if(URL != OldURL) { // running once
+      if(OldURL != nullptr) return "Cannot change URL in HTTP_POST_puts!\n";
+      http.setReuse(true);
+      OldURL = URL;
+    }
+
     http.begin(URL);
     http.addHeader("Content-Type", "text/plain");
 
-    int httpCode = http.POST((uint8_t *)s, strlen(s));
+    int httpCode = http.POST((uint8_t *)s, sz);
     http.end();
 
     if(httpCode != 200) return sprintf_static("Wrong response code %d!", httpCode);
-     return nullptr;
+    return nullptr;
+  } // HTTP_POST_puts
+
+  const char *HTTP_POST_puts(const char *URL, const char *s) {
+    return HTTP_POST_puts(URL, s, strlen(s));
   } // HTTP_POST_puts
 } // namespace avp

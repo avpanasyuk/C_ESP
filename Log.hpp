@@ -24,11 +24,8 @@ namespace avp {
       Br = Break;
       BrL = strlen(Break);
       if(Sz != size) Text = (char *)realloc(Text, (Sz = size) + 1); // for trailing zero
-      if(Text == nullptr) if(Serial) {
-        Serial.println("Log failed to allocate a buffer");
-        abort();
-      }
-      Text[0] = 0;
+      if(Text == nullptr) debug_puts("Log failed to allocate a buffer!\n");
+      else Text[0] = 0;
     } // begin
 
     static const char *Get() {
@@ -36,28 +33,46 @@ namespace avp {
       return Text;
     }
 
-    static void IRAM_ATTR Add(const char *s, bool NoBreak = false) {
-      if(Text == nullptr) begin();
-      const int N{(int)strlen(s)};
-      const int Length{(int)strlen(Text)};
-      const int SpaceForBreak{NoBreak ? 0 : BrL};
+    /**
+     * @brief function adds s to buffer Text, replacing '\n' with "<br>"
+     *
+     * @param s
+     * @param AddBreak - adds "<br>" at the end of s.
+     */
+    static void Add(const char *s, bool AddBreak = false) {
+      Add(s, strlen(s), AddBreak);
+    } // Add
+    static void Add(const char *s, const int N, bool AddBreak = false) {
+      if(Text == nullptr) begin(); // it should not happen
 
-      if(N + SpaceForBreak > Sz) Add("New entry is too big!");
-      else {
-        int Shift = Length + N + SpaceForBreak - Sz; // new string does not fit, how much I have to shift log up
-        char *p = Text;
+      // replace newlines with breaks, using recursion
+      char *pos = (char *)memchr(s, '\n', N);
+      if(pos != nullptr) { // found newline, sending first line and recurse the rest
+        const int FirstLineN = pos - s;
+        Add(s, FirstLineN, true);
+        if(pos[1] != 0) Add(pos + 1, N - FirstLineN - 1, AddBreak);
+      } else {
+        const int Length{(int)strlen(Text)};
+        const int SpaceForBreak{AddBreak ? BrL : 0};
 
-        if(Shift > 0) {                               // overran, got to shift at least by Shift 
-          const char *pBr = strstr(Text + Shift, Br); // find next break after Shift
+        if(N + SpaceForBreak > Sz) Add("New entry is too big!");
+        else {
+          int Shift = Length + N + SpaceForBreak - Sz; // new string does not fit, how much I have to shift log up
+          char *p = Text;
 
-          if(pBr != nullptr) {
-            pBr += BrL;                             // step over the last break, we do not need to copy it
-            for(; *pBr != 0; ++p, ++pBr) *p = *pBr; // shift buffer
-          }
-        } else p += Length; // no shift, just step over the end of the string
-        strcpy(p, s);
-        if(!NoBreak) strcpy(p + N, Br);
+          if(Shift > 0) {                               // overran, got to shift at least by Shift
+            const char *pBr = strstr(Text + Shift, Br); // find next break after Shift
+
+            if(pBr != nullptr) {
+              pBr += BrL;                             // step over the last break, we do not need to copy it
+              for(; *pBr != 0; ++p, ++pBr) *p = *pBr; // shift buffer
+            }
+          } else p += Length; // no shift, just step over the end of the string
+          strncpy(p, s, N);
+          if(AddBreak) strcpy(p + N, Br);
+          else p[N] = 0; // strncpy does not always put trailing 0
+        }
       }
-     } // Add
+    } // Add
   }; // class Log
 } // namespace avp

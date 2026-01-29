@@ -165,7 +165,7 @@ namespace avp {
         WiFi.setSleepMode(WIFI_NONE_SLEEP);
 #endif
         delay(100);
-        DEBUG_LINE_NUM
+        DEBUG_PUT_PLACE
         OTA_IsInProgress = true;
       });
       ArduinoOTA.onEnd([]() {
