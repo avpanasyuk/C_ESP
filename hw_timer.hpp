@@ -47,8 +47,8 @@ namespace avp {
       uint32_t Period_ticks; ///< set to 0 to disable timer
       Timer_t(): Period_ticks(0) {}
       
-      void IRAM_ATTR Start() { PAUSE_ESP_INTERRUPTS; CurrentTick = Period_ticks - 1; }
-      void IRAM_ATTR Stop() { PAUSE_ESP_INTERRUPTS; CurrentTick = -1; }
+      void IRAM_ATTR Start() { CurrentTick = Period_ticks - 1; }
+      void IRAM_ATTR Stop() { CurrentTick = -1; }
     } Timer[MaxNumOfTimers];
 
   private:
