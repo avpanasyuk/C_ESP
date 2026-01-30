@@ -18,6 +18,7 @@
 #include "service.h"
 
 namespace avp {
+  void IRAM_ATTR onHW_Interrupt();
   /**
    * @brief this static class links to a single hardware timer interrupt with number Id
    * triggered each microsecond
@@ -51,10 +52,7 @@ namespace avp {
       void IRAM_ATTR Stop() { CurrentTick = -1; }
     } Timer[MaxNumOfTimers];
 
-  private:
-    static inline uint8_t NumTimers; ///< number of created SW timers
-
-    static void IRAM_ATTR onHW_Interrupt() {
+    static void  __attribute__((always_inline))  _onHW_Interrupt() {
       for(uint_fast8_t TimerI = 0; TimerI < NumTimers; ++TimerI) {
         if(Timer[TimerI].CurrentTick < 0) continue;
         if(Timer[TimerI].CurrentTick == 0) {
@@ -63,10 +61,12 @@ namespace avp {
       }
     } // onHW_Interrupt
 
-    static void begin() {
+  private:
+    static inline uint8_t NumTimers = 0; ///< number of created SW timers
+
+     static void begin() {
       static bool Begun = false; ///< makes sure I do it once only
       if(!Begun) {
-        NumTimers = 0;
 #ifdef ESP32
         hw_timer_t *ptimer = timerBegin(HWidx, Divider, true); //!!!!!!! NEVER EVER SET COUNT DOWN 
         timerAttachInterrupt(ptimer, onHW_Interrupt, true); // attaches interrupt handler, true = edge trigger, does not matter
@@ -108,4 +108,5 @@ namespace avp {
     } // CreateTimer
   }; // HW_Timer
 
+  void IRAM_ATTR onHW_Interrupt() { HW_Timer_ms<>::_onHW_Interrupt(); } // IRAM_ATTR does not work in template class static members
 } // namespace avp
