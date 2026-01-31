@@ -27,6 +27,15 @@
 #include "soc/pcnt_struct.h"
 #include "hal/pcnt_types.h"
 
+#ifndef AVP_RAM_ATTR
+#define AVP_RAM_ATTR // set to IRAM_ATTR for ESP
+#else
+#if defined(ESP32) || defined(ESP8266)
+#include <esp_attr.h>
+#endif 
+#endif
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,356 +43,363 @@ extern "C" {
 #define PCNT_LL_GET_HW(num) (((num) == 0) ? (&PCNT) : NULL)
 #define PCNT_LL_MAX_GLITCH_WIDTH 1023
 
-typedef enum {
+// force 32-bit access to PCNT registers
+
+#define FORCE_32_R(field)                                             \
+  auto val32 = PCNT.field.val;                                        \
+  using field_type = std::remove_reference_t<decltype((PCNT.field))>; \
+  field_type *s = (field_type *)&val32;
+
+#define FORCE_32_RMW(field, modify)                                   \
+  FORCE_32_R(field)                                                   \
+  {modify};                                                           \
+  PCNT.field.val = val32;
+
+  typedef enum {
     PCNT_LL_EVENT_THRES1,
     PCNT_LL_EVENT_THRES0,
     PCNT_LL_EVENT_LOW_LIMIT,
     PCNT_LL_EVENT_HIGH_LIMIT,
     PCNT_LL_EVENT_ZERO_CROSS,
     PCNT_LL_EVENT_MAX
-} pcnt_ll_event_id_t;
+  } pcnt_ll_event_id_t;
 
 #define PCNT_LL_EVENT_MASK ((1 << PCNT_LL_EVENT_MAX) - 1)
 
-/**
- * @brief Set PCNT channel edge action
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param channel PCNT channel number
- * @param pos_act Counter action when detecting positive edge
- * @param neg_act Counter action when detecting negative edge
- */
-static inline void pcnt_ll_set_edge_action(pcnt_dev_t *hw, uint32_t unit, uint32_t channel, pcnt_channel_edge_action_t pos_act, pcnt_channel_edge_action_t neg_act)
-{
-    if (channel == 0) {
-        hw->conf_unit[unit].conf0.ch0_pos_mode = pos_act;
-        hw->conf_unit[unit].conf0.ch0_neg_mode = neg_act;
+  /**
+   * @brief Set PCNT channel edge action
+   *
+   *
+   * @param unit PCNT unit number
+   * @param channel PCNT channel number
+   * @param pos_act Counter action when detecting positive edge
+   * @param neg_act Counter action when detecting negative edge
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_set_edge_action(uint32_t unit, uint32_t channel,
+    pcnt_channel_edge_action_t pos_act, pcnt_channel_edge_action_t neg_act) {
+    FORCE_32_RMW(conf_unit[unit].conf0, if(channel == 0) {
+      s->ch0_pos_mode = pos_act;
+      s->ch0_neg_mode = neg_act; } else {
+      s->ch1_pos_mode = pos_act;
+      s->ch1_neg_mode = neg_act; })
+  }
+
+  /**
+   * @brief Set PCNT channel level action
+   *
+   *
+   * @param unit PCNT unit number
+   * @param channel PCNT channel number
+   * @param high_act Counter action when control signal is high level
+   * @param low_act Counter action when control signal is low level
+   */
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_set_level_action(uint32_t unit, uint32_t channel, pcnt_channel_level_action_t high_act, pcnt_channel_level_action_t low_act) {
+    FORCE_32_RMW(conf_unit[unit].conf0,
+    if(channel == 0) {
+      s->ch0_hctrl_mode = high_act;
+      s->ch0_lctrl_mode = low_act;
     } else {
-        hw->conf_unit[unit].conf0.ch1_pos_mode = pos_act;
-        hw->conf_unit[unit].conf0.ch1_neg_mode = neg_act;
-    }
-}
+      s->ch1_hctrl_mode = high_act;
+      s->ch1_lctrl_mode = low_act;
+    });
+  }
 
-/**
- * @brief Set PCNT channel level action
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param channel PCNT channel number
- * @param high_act Counter action when control signal is high level
- * @param low_act Counter action when control signal is low level
- */
-static inline void pcnt_ll_set_level_action(pcnt_dev_t *hw, uint32_t unit, uint32_t channel, pcnt_channel_level_action_t high_act, pcnt_channel_level_action_t low_act)
-{
-    if (channel == 0) {
-        hw->conf_unit[unit].conf0.ch0_hctrl_mode = high_act;
-        hw->conf_unit[unit].conf0.ch0_lctrl_mode = low_act;
+  /**
+   * @brief Get pulse counter value
+   *
+   * @param unit  Pulse Counter unit number
+   * @return PCNT count value (a signed integer)
+   */
+  static inline AVP_RAM_ATTR
+  int16_t pcnt_ll_get_count(uint32_t unit) {
+    FORCE_32_R(cnt_unit[unit]);
+    return s->cnt_val;
+  }
+
+  /**
+   * @brief Pause PCNT counter of PCNT unit
+   *
+   *
+   * @param unit PCNT unit number
+   */
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_stop_count(uint32_t unit) {
+    PCNT.ctrl.val |= 1 << (2 * unit + 1);
+  }
+
+  /**
+   * @brief Resume counting for PCNT counter
+   *
+   *
+   * @param unit PCNT unit number, select from uint32_t
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_start_count(uint32_t unit) {
+    PCNT.ctrl.val &= ~(1 << (2 * unit + 1));
+  }
+
+  /**
+   * @brief Clear PCNT counter value to zero
+   *
+   *
+   * @param  unit PCNT unit number, select from uint32_t
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_clear_count(uint32_t unit) {
+    PCNT.ctrl.val |= 1 << (2 * unit);
+    PCNT.ctrl.val &= ~(1 << (2 * unit));
+  }
+
+  /**
+   * @brief Enable PCNT interrupt for PCNT unit
+   * @note  Each PCNT unit has five watch point events that share the same interrupt bit.
+   *
+   *
+   * @param unit_mask PCNT units mask
+   * @param enable True to enable interrupt, False to disable interrupt
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_enable_intr(uint32_t unit_mask, bool enable) {
+    if(enable) {
+      PCNT.int_ena.val |= unit_mask;
     } else {
-        hw->conf_unit[unit].conf0.ch1_hctrl_mode = high_act;
-        hw->conf_unit[unit].conf0.ch1_lctrl_mode = low_act;
+      PCNT.int_ena.val &= ~unit_mask;
     }
-}
+  }
 
-/**
- * @brief Get pulse counter value
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit  Pulse Counter unit number
- * @return PCNT count value (a signed integer)
- */
-static inline int16_t pcnt_ll_get_count(pcnt_dev_t *hw, uint32_t unit)
-{
-    return hw->cnt_unit[unit].cnt_val;
-}
+  /**
+   * @brief Get PCNT interrupt status
+   *
+   *
+   * @return Interrupt status word
+   */
+  static inline AVP_RAM_ATTR
+  uint32_t pcnt_ll_get_intr_status(pcnt_dev_t *hw) {
+    return PCNT.int_st.val;
+  }
 
-/**
- * @brief Pause PCNT counter of PCNT unit
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- */
-static inline void pcnt_ll_stop_count(pcnt_dev_t *hw, uint32_t unit)
-{
-    hw->ctrl.val |= 1 << (2 * unit + 1);
-}
+  /**
+   * @brief Clear PCNT interrupt status
+   *
+   *
+   * @param status value to clear interrupt status
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_clear_intr_status(uint32_t status) {
+    PCNT.int_clr.val = status;
+  }
 
-/**
- * @brief Resume counting for PCNT counter
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number, select from uint32_t
- */
-static inline void pcnt_ll_start_count(pcnt_dev_t *hw, uint32_t unit)
-{
-    hw->ctrl.val &= ~(1 << (2 * unit + 1));
-}
+  /**
+   * @brief Enable PCNT high limit event
+   *
+   *
+   * @param unit PCNT unit number
+   * @param enable true to enable, false to disable
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_enable_high_limit_event(uint32_t unit, bool enable) {
+    FORCE_32_RMW(conf_unit[unit].conf0, s->thr_h_lim_en = enable;);
+  }
 
-/**
- * @brief Clear PCNT counter value to zero
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param  unit PCNT unit number, select from uint32_t
- */
-static inline void pcnt_ll_clear_count(pcnt_dev_t *hw, uint32_t unit)
-{
-    hw->ctrl.val |= 1 << (2 * unit);
-    hw->ctrl.val &= ~(1 << (2 * unit));
-}
+  /**
+   * @brief Enable PCNT low limit event
+   *
+   *
+   * @param unit PCNT unit number
+   * @param enable true to enable, false to disable
+   */
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_enable_low_limit_event(uint32_t unit, bool enable) {
+    FORCE_32_RMW(conf_unit[unit].conf0, s->thr_l_lim_en = enable;);
+  }
 
-/**
- * @brief Enable PCNT interrupt for PCNT unit
- * @note  Each PCNT unit has five watch point events that share the same interrupt bit.
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit_mask PCNT units mask
- * @param enable True to enable interrupt, False to disable interrupt
- */
-static inline void pcnt_ll_enable_intr(pcnt_dev_t *hw, uint32_t unit_mask, bool enable)
-{
-    if (enable) {
-        hw->int_ena.val |= unit_mask;
+  /**
+   * @brief Enable PCNT zero cross event
+   *
+   *
+   * @param unit PCNT unit number
+   * @param enable true to enable, false to disable
+   */
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_enable_zero_cross_event(uint32_t unit, bool enable) {
+    FORCE_32_RMW(conf_unit[unit].conf0, s->thr_zero_en = enable;);
+  }
+
+  /**
+   * @brief Enable PCNT threshold event
+   *
+   *
+   * @param unit PCNT unit number
+   * @param thres Threshold ID
+   * @param enable true to enable, false to disable
+   */
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_enable_thres_event(uint32_t unit, uint32_t thres, bool enable) {
+    FORCE_32_RMW(conf_unit[unit].conf0,
+    if(thres == 0) {
+      s->thr_thres0_en = enable;
     } else {
-        hw->int_ena.val &= ~unit_mask;
-    }
-}
+      s->thr_thres1_en = enable;
+    });
+  }
 
-/**
- * @brief Get PCNT interrupt status
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @return Interrupt status word
- */
-__attribute__((always_inline)) static inline uint32_t pcnt_ll_get_intr_status(pcnt_dev_t *hw)
-{
-    return hw->int_st.val;
-}
+  /**
+   * @brief Disable all PCNT threshold events
+   *
+   *
+   * @param unit unit number
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_disable_all_events(uint32_t unit) {
+    PCNT.conf_unit[unit].conf0.val &= ~(PCNT_LL_EVENT_MASK << 11);
+  }
 
-/**
- * @brief Clear PCNT interrupt status
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param status value to clear interrupt status
- */
-__attribute__((always_inline)) static inline void pcnt_ll_clear_intr_status(pcnt_dev_t *hw, uint32_t status)
-{
-    hw->int_clr.val = status;
-}
+  /**
+   * @brief Set PCNT high limit value
+   *
+   *
+   * @param unit PCNT unit number
+   * @param value PCNT high limit value
+   */
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_set_high_limit_value(uint32_t unit, int value) {
+    FORCE_32_RMW(conf_unit[unit].conf2, s->cnt_h_lim = value;);
+  }
 
-/**
- * @brief Enable PCNT high limit event
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param enable true to enable, false to disable
- */
-static inline void pcnt_ll_enable_high_limit_event(pcnt_dev_t *hw, uint32_t unit, bool enable)
-{
-    hw->conf_unit[unit].conf0.thr_h_lim_en = enable;
-}
+  /**
+   * @brief Set PCNT low limit value
+   *
+   *
+   * @param unit PCNT unit number
+   * @param value PCNT low limit value
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_set_low_limit_value(uint32_t unit, int value) {
+    FORCE_32_RMW(conf_unit[unit].conf2, s->cnt_l_lim = value;);
+  }
 
-/**
- * @brief Enable PCNT low limit event
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param enable true to enable, false to disable
- */
-static inline void pcnt_ll_enable_low_limit_event(pcnt_dev_t *hw, uint32_t unit, bool enable)
-{
-    hw->conf_unit[unit].conf0.thr_l_lim_en = enable;
-}
-
-/**
- * @brief Enable PCNT zero cross event
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param enable true to enable, false to disable
- */
-static inline void pcnt_ll_enable_zero_cross_event(pcnt_dev_t *hw, uint32_t unit, bool enable)
-{
-    hw->conf_unit[unit].conf0.thr_zero_en = enable;
-}
-
-/**
- * @brief Enable PCNT threshold event
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param thres Threshold ID
- * @param enable true to enable, false to disable
- */
-static inline void pcnt_ll_enable_thres_event(pcnt_dev_t *hw, uint32_t unit, uint32_t thres, bool enable)
-{
-    if (thres == 0) {
-        hw->conf_unit[unit].conf0.thr_thres0_en = enable;
+  /**
+   * @brief Set PCNT threshold value
+   *
+   *
+   * @param unit PCNT unit number
+   * @param thres Threshold ID
+   * @param value PCNT threshold value
+   */
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_set_thres_value(uint32_t unit, uint32_t thres, int value) {
+    FORCE_32_RMW(conf_unit[unit].conf1, 
+      if(thres == 0) {
+        s->cnt_thres0 = value;
     } else {
-        hw->conf_unit[unit].conf0.thr_thres1_en = enable;
-    }
-}
+        s->cnt_thres1 = value;
+    });
+  }
 
-/**
- * @brief Disable all PCNT threshold events
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit unit number
- */
-static inline void pcnt_ll_disable_all_events(pcnt_dev_t *hw, uint32_t unit)
-{
-    hw->conf_unit[unit].conf0.val &= ~(PCNT_LL_EVENT_MASK << 11);
-}
+  /**
+   * @brief Get PCNT high limit value
+   *
+   *
+   * @param unit PCNT unit number
+   * @return PCNT high limit value
+   */
+  static inline AVP_RAM_ATTR 
+  int16_t pcnt_ll_get_high_limit_value(uint32_t unit) {
+    FORCE_32_R(conf_unit[unit].conf2);
+    return s->cnt_h_lim;
+  }
 
-/**
- * @brief Set PCNT high limit value
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param value PCNT high limit value
- */
-static inline void pcnt_ll_set_high_limit_value(pcnt_dev_t *hw, uint32_t unit, int value)
-{
-    hw->conf_unit[unit].conf2.cnt_h_lim = value;
-}
+  /**
+   * @brief Get PCNT low limit value
+   *
+   *
+   * @param unit PCNT unit number
+   * @return PCNT high limit value
+   */
+  static inline AVP_RAM_ATTR int16_t pcnt_ll_get_low_limit_value(uint32_t unit) {
+    FORCE_32_R(conf_unit[unit].conf2);
+    return s->cnt_l_lim;
+  }
 
-/**
- * @brief Set PCNT low limit value
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param value PCNT low limit value
- */
-static inline void pcnt_ll_set_low_limit_value(pcnt_dev_t *hw, uint32_t unit, int value)
-{
-    hw->conf_unit[unit].conf2.cnt_l_lim = value;
-}
+  /**
+   * @brief Get PCNT threshold value
+   *
+   *
+   * @param unit PCNT unit number
+   * @param thres Threshold ID
+   * @return PCNT threshold value
+   */
+  static inline AVP_RAM_ATTR 
+  int16_t pcnt_ll_get_thres_value(uint32_t unit, uint32_t thres) {
+    FORCE_32_R(conf_unit[unit].conf1);
+    return thres == 0 ? s->cnt_thres0 : s->cnt_thres1;
+  }
 
-/**
- * @brief Set PCNT threshold value
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param thres Threshold ID
- * @param value PCNT threshold value
- */
-static inline void pcnt_ll_set_thres_value(pcnt_dev_t *hw, uint32_t unit, uint32_t thres, int value)
-{
-    if (thres == 0) {
-      hw->conf_unit[unit].conf1.cnt_thres0 = value;
-    } else {
-      hw->conf_unit[unit].conf1.cnt_thres1 = value;
-    }
-}
+  /**
+   * @brief Get PCNT unit runtime status
+   *
+   *
+   * @param unit PCNT unit number
+   * @return PCNT unit runtime status
+   */
+  static inline AVP_RAM_ATTR 
+  uint32_t pcnt_ll_get_unit_status(uint32_t unit) {
+    return PCNT.status_unit[unit].val;
+  }
 
-/**
- * @brief Get PCNT high limit value
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @return PCNT high limit value
- */
-static inline int16_t pcnt_ll_get_high_limit_value(pcnt_dev_t *hw, uint32_t unit)
-{
-    return hw->conf_unit[unit].conf2.cnt_h_lim;
-}
+  /**
+   * @brief Get PCNT count sign
+   *
+   *
+   * @param unit PCNT unit number
+   * @return Count sign
+   */
+  static inline AVP_RAM_ATTR 
+  pcnt_unit_count_sign_t pcnt_ll_get_count_sign(uint32_t unit) {
+    return pcnt_unit_count_sign_t(PCNT.status_unit[unit].val & 0x03);
+  }
 
-/**
- * @brief Get PCNT low limit value
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @return PCNT high limit value
- */
-static inline int16_t pcnt_ll_get_low_limit_value(pcnt_dev_t *hw, uint32_t unit)
-{
-    return hw->conf_unit[unit].conf2.cnt_l_lim;
-}
+  /**
+   * @brief Get PCNT event status
+   *
+   *
+   * @param unit PCNT unit number
+   * @return Event status word
+   */
+  static inline AVP_RAM_ATTR 
+  uint32_t pcnt_ll_get_event_status(uint32_t unit) {
+    return PCNT.status_unit[unit].val >> 2;
+  }
 
-/**
- * @brief Get PCNT threshold value
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param thres Threshold ID
- * @return PCNT threshold value
- */
-static inline int16_t pcnt_ll_get_thres_value(pcnt_dev_t *hw, uint32_t unit, uint32_t thres)
-{
-    return thres == 0?hw->conf_unit[unit].conf1.cnt_thres0:hw->conf_unit[unit].conf1.cnt_thres1;
-}
+  /**
+   * @brief Set PCNT glitch filter threshold
+   *
+   *
+   * @param unit PCNT unit number
+   * @param filter_val PCNT signal filter value, counter in APB_CLK cycles.
+   *        Any pulses lasting shorter than this will be ignored when the filter is enabled.
+   */
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_set_glitch_filter_thres(uint32_t unit, uint32_t filter_val) {
+    FORCE_32_RMW(conf_unit[unit].conf0, s->filter_thres = filter_val;);
+  }
 
-/**
- * @brief Get PCNT unit runtime status
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @return PCNT unit runtime status
- */
-static inline uint32_t pcnt_ll_get_unit_status(pcnt_dev_t *hw, uint32_t unit)
-{
-    return hw->status_unit[unit].val;
-}
+  /**
+   * @brief Get PCNT glitch filter threshold
+   *
+   *
+   * @param unit PCNT unit number
+   * @return glitch filter threshold
+   */
+  static inline AVP_RAM_ATTR uint32_t pcnt_ll_get_glitch_filter_thres(uint32_t unit) {
+    FORCE_32_R(conf_unit[unit].conf0);
+    return s->filter_thres;
+  }
 
-/**
- * @brief Get PCNT count sign
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @return Count sign
- */
-static inline pcnt_unit_count_sign_t pcnt_ll_get_count_sign(pcnt_dev_t *hw, uint32_t unit)
-{
-    return pcnt_unit_count_sign_t(hw->status_unit[unit].val & 0x03);
-}
-
-/**
- * @brief Get PCNT event status
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @return Event status word
- */
-static inline uint32_t pcnt_ll_get_event_status(pcnt_dev_t *hw, uint32_t unit)
-{
-    return hw->status_unit[unit].val >> 2;
-}
-
-/**
- * @brief Set PCNT glitch filter threshold
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param filter_val PCNT signal filter value, counter in APB_CLK cycles.
- *        Any pulses lasting shorter than this will be ignored when the filter is enabled.
- */
-static inline void pcnt_ll_set_glitch_filter_thres(pcnt_dev_t *hw, uint32_t unit, uint32_t filter_val)
-{
-    hw->conf_unit[unit].conf0.filter_thres = filter_val;
-}
-
-/**
- * @brief Get PCNT glitch filter threshold
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @return glitch filter threshold
- */
-static inline uint32_t pcnt_ll_get_glitch_filter_thres(pcnt_dev_t *hw, uint32_t unit)
-{
-    return hw->conf_unit[unit].conf0.filter_thres;
-}
-
-/**
- * @brief Enable PCNT glitch filter
- *
- * @param hw Peripheral PCNT hardware instance address.
- * @param unit PCNT unit number
- * @param enable True to enable the filter, False to disable the filter
- */
-static inline void pcnt_ll_enable_glitch_filter(pcnt_dev_t *hw, uint32_t unit, bool enable)
-{
-    hw->conf_unit[unit].conf0.filter_en = enable;
-}
+  /**
+   * @brief Enable PCNT glitch filter
+   *
+   *
+   * @param unit PCNT unit number
+   * @param enable True to enable the filter, False to disable the filter
+   */
+  static inline AVP_RAM_ATTR void pcnt_ll_enable_glitch_filter(uint32_t unit, bool enable) {
+    FORCE_32_RMW(conf_unit[unit].conf0, s->filter_en = enable;);
+  }
 
 #ifdef __cplusplus
 }

@@ -44,25 +44,25 @@ namespace avp {
 #endif
 
   template<uint8_t pin, bool val>
-  inline void __attribute__((always_inline)) WritePin() { DIGITAL_WRITE_BODY }
+  void inline __attribute__((always_inline)) WritePin() { DIGITAL_WRITE_BODY }
 
   template<uint8_t pin>
-  inline void __attribute__((always_inline)) WritePin(bool val) { DIGITAL_WRITE_BODY }
-  inline void __attribute__((always_inline)) WritePin(uint8_t pin, bool val) { DIGITAL_WRITE_BODY }
+  void inline __attribute__((always_inline)) WritePin(bool val) { DIGITAL_WRITE_BODY }
+  void inline __attribute__((always_inline)) WritePin(uint8_t pin, bool val) { DIGITAL_WRITE_BODY }
 
   template<uint8_t pin>
-  inline bool __attribute__((always_inline)) ReadPin() { DIGITAL_READ_BODY }
-  inline bool __attribute__((always_inline)) ReadPin(uint8_t pin) { DIGITAL_READ_BODY }
+  bool inline __attribute__((always_inline)) ReadPin() { DIGITAL_READ_BODY }
+  bool inline __attribute__((always_inline)) ReadPin(uint8_t pin) { DIGITAL_READ_BODY }
 
   template<uint8_t pin>
-  inline void __attribute__((always_inline)) TogglePin() { DIGITAL_TOGGLE_BODY }
-  inline void __attribute__((always_inline)) TogglePin(uint8_t pin) { DIGITAL_TOGGLE_BODY }
+  void inline __attribute__((always_inline)) TogglePin() { DIGITAL_TOGGLE_BODY }
+  void inline __attribute__((always_inline)) TogglePin(uint8_t pin) { DIGITAL_TOGGLE_BODY }
 
   template<uint8_t pin>
-  inline void __attribute__((always_inline)) SetPin() { WritePin<pin, 1>(); }
-  inline void __attribute__((always_inline)) SetPin(uint8_t pin) { WritePin(pin, 1); }
+  void inline __attribute__((always_inline)) SetPin() { WritePin<pin, 1>(); }
+  void inline __attribute__((always_inline)) SetPin(uint8_t pin) { WritePin(pin, 1); }
 
   template<uint8_t pin>
-  inline void __attribute__((always_inline)) ClearPin() { WritePin<pin, 0>(); }
-  inline void __attribute__((always_inline)) ClearPin(uint8_t pin) { WritePin(pin, 0); }
+  void inline __attribute__((always_inline)) ClearPin() { WritePin<pin, 0>(); }
+  void inline __attribute__((always_inline)) ClearPin(uint8_t pin) { WritePin(pin, 0); }
 } // namespace avp
