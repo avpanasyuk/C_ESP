@@ -134,7 +134,8 @@ extern "C" {
    *
    * @param unit PCNT unit number, select from uint32_t
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_start_count(uint32_t unit) {
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_start_count(uint32_t unit) {
     PCNT.ctrl.val &= ~(1 << (2 * unit + 1));
   }
 
@@ -144,7 +145,8 @@ extern "C" {
    *
    * @param  unit PCNT unit number, select from uint32_t
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_clear_count(uint32_t unit) {
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_clear_count(uint32_t unit) {
     PCNT.ctrl.val |= 1 << (2 * unit);
     PCNT.ctrl.val &= ~(1 << (2 * unit));
   }
@@ -157,7 +159,8 @@ extern "C" {
    * @param unit_mask PCNT units mask
    * @param enable True to enable interrupt, False to disable interrupt
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_enable_intr(uint32_t unit_mask, bool enable) {
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_enable_intr(uint32_t unit_mask, bool enable) {
     if(enable) {
       PCNT.int_ena.val |= unit_mask;
     } else {
@@ -172,7 +175,7 @@ extern "C" {
    * @return Interrupt status word
    */
   static inline AVP_RAM_ATTR
-  uint32_t pcnt_ll_get_intr_status(pcnt_dev_t *hw) {
+  uint32_t pcnt_ll_get_intr_status() {
     return PCNT.int_st.val;
   }
 
@@ -182,7 +185,8 @@ extern "C" {
    *
    * @param status value to clear interrupt status
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_clear_intr_status(uint32_t status) {
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_clear_intr_status(uint32_t status) {
     PCNT.int_clr.val = status;
   }
 
@@ -193,7 +197,8 @@ extern "C" {
    * @param unit PCNT unit number
    * @param enable true to enable, false to disable
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_enable_high_limit_event(uint32_t unit, bool enable) {
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_enable_high_limit_event(uint32_t unit, bool enable) {
     FORCE_32_RMW(conf_unit[unit].conf0, s->thr_h_lim_en = enable;);
   }
 
@@ -245,7 +250,8 @@ extern "C" {
    *
    * @param unit unit number
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_disable_all_events(uint32_t unit) {
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_disable_all_events(uint32_t unit) {
     PCNT.conf_unit[unit].conf0.val &= ~(PCNT_LL_EVENT_MASK << 11);
   }
 
@@ -268,7 +274,8 @@ extern "C" {
    * @param unit PCNT unit number
    * @param value PCNT low limit value
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_set_low_limit_value(uint32_t unit, int value) {
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_set_low_limit_value(uint32_t unit, int value) {
     FORCE_32_RMW(conf_unit[unit].conf2, s->cnt_l_lim = value;);
   }
 
@@ -310,7 +317,8 @@ extern "C" {
    * @param unit PCNT unit number
    * @return PCNT high limit value
    */
-  static inline AVP_RAM_ATTR int16_t pcnt_ll_get_low_limit_value(uint32_t unit) {
+  static inline AVP_RAM_ATTR 
+  int16_t pcnt_ll_get_low_limit_value(uint32_t unit) {
     FORCE_32_R(conf_unit[unit].conf2);
     return s->cnt_l_lim;
   }
@@ -385,7 +393,8 @@ extern "C" {
    * @param unit PCNT unit number
    * @return glitch filter threshold
    */
-  static inline AVP_RAM_ATTR uint32_t pcnt_ll_get_glitch_filter_thres(uint32_t unit) {
+  static inline AVP_RAM_ATTR 
+  uint32_t pcnt_ll_get_glitch_filter_thres(uint32_t unit) {
     FORCE_32_R(conf_unit[unit].conf0);
     return s->filter_thres;
   }
@@ -397,7 +406,8 @@ extern "C" {
    * @param unit PCNT unit number
    * @param enable True to enable the filter, False to disable the filter
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_enable_glitch_filter(uint32_t unit, bool enable) {
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_enable_glitch_filter(uint32_t unit, bool enable) {
     FORCE_32_RMW(conf_unit[unit].conf0, s->filter_en = enable;);
   }
 
