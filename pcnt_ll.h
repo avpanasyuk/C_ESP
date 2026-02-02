@@ -53,7 +53,7 @@ extern "C" {
 #define FORCE_32_RMW(field, modify)                                   \
   FORCE_32_R(field)                                                   \
   {modify};                                                           \
-  PCNT.field.val = val32;
+  PCNT.field.val = val32; 
 
   typedef enum {
     PCNT_LL_EVENT_THRES1,
@@ -66,6 +66,9 @@ extern "C" {
 
 #define PCNT_LL_EVENT_MASK ((1 << PCNT_LL_EVENT_MAX) - 1)
 
+
+static inline AVP_RAM_ATTR 
+  void pcnt_ll_enable_clock() { FORCE_32_RMW(ctrl, s->clk_en = 1;); }
   /**
    * @brief Set PCNT channel edge action
    *
@@ -75,7 +78,8 @@ extern "C" {
    * @param pos_act Counter action when detecting positive edge
    * @param neg_act Counter action when detecting negative edge
    */
-  static inline AVP_RAM_ATTR void pcnt_ll_set_edge_action(uint32_t unit, uint32_t channel,
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_set_edge_action(uint32_t unit, uint32_t channel,
     pcnt_channel_edge_action_t pos_act, pcnt_channel_edge_action_t neg_act) {
     FORCE_32_RMW(conf_unit[unit].conf0, if(channel == 0) {
       s->ch0_pos_mode = pos_act;
@@ -104,6 +108,9 @@ extern "C" {
       s->ch1_lctrl_mode = low_act;
     });
   }
+
+  static inline AVP_RAM_ATTR 
+  void pcnt_ll_clear_interrupts() { PCNT.int_clr.val = ~(uint32_t)0; }
 
   /**
    * @brief Get pulse counter value
