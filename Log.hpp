@@ -45,6 +45,7 @@ namespace avp {
      * @param AddBreak
      */
     static void AddLine(const char *s, const int N, bool AddBreak = false) {
+      if(Text == nullptr) begin();
       const int Length{(int)strlen(Text)};
       const int SpaceForBreak{AddBreak ? BrL : 0};
 

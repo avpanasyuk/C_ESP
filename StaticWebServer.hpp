@@ -29,7 +29,7 @@ using WebServer = ESP8266WebServer;
 
 namespace avp {
   class avp::Print DebugPrint(debug_puts);
-  static void dot() { debug_puts("."); }
+  // static void dot() { debug_puts("."); }
 
   /**
    * @brief This is interface class for static Sync WebServer

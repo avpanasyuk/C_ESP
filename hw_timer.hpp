@@ -6,10 +6,13 @@
 #include <soc/soc_caps.h>
 #include <driver/timer.h>
 #define NUM_HW_TIMERS SOC_TIMER_GROUP_TOTAL_TIMERS
+#define DEFAULT_TIMER 2 // avoid timer 0 and 1, used by RTOS and WiFi
 #endif
 #ifdef ESP8266
 #define NUM_HW_TIMERS 1
-#include <driver/hw_timer.h>
+#define TIMER_BASE_CLK (F_CPU / 16UL)
+// #include <driver/hw_timer.h>
+#define DEFAULT_TIMER 0
 #endif
 
 #include <Arduino.h>
@@ -26,10 +29,9 @@ namespace avp {
    * up to a number MaxNumOfTimers
    * @tparam HWidx: index of hardware timer to use
    */
-  template<uint8_t HWidx = 2, uint16_t Divider = TIMER_BASE_CLK / 10000UL> // avoid timer 0 and 1. hw clock 100 us, we need alarm_value in timerAlarmWrite
+  template<uint8_t HWidx = DEFAULT_TIMER, uint16_t Divider = TIMER_BASE_CLK / 10000UL> // hw clock 100 us, we need alarm_value in timerAlarmWrite
                                                                            // to be higher than 1 with a margin, 10 seems ok
   class HW_Timer_ms {                                                      // counts milliseconds
-    static_assert(HWidx != 0, "Used by FreeRTOS, do not mess!");
     static_assert(HWidx < NUM_HW_TIMERS, "Wrong hardware timer index!");
 
     static constexpr uint8_t MaxNumOfTimers = 10; // I do not want to put it into template parameters,
