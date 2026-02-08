@@ -41,7 +41,8 @@ static const char *LittleFS_AUTH = "/net_auth.txt";
 #include "C_General/millis_micros.hpp"
 #include "C_General/MyTime.hpp"
 #include "fast_gpio.hpp"
-#include "hw_timer.hpp"
+#include "hw_timer.hpp" // I have to run Blinken from hardware interrupt, as loop() runs after everything
+// is set already
 #include "service.h"
 
 namespace avp {
@@ -55,14 +56,14 @@ namespace avp {
     } ConnStatus = Status_t::BEFORE_BEGIN; // static so it can be reached from an interrupt
 
     typedef void (*status_indication_func_t)(); ///< should be declared IRAM_ATTR
-    static void IRAM_ATTR idle() {};
+                                                // static void IRAM_ATTR idle() {};
 
 #ifdef LED_BUILTIN
     template<uint8_t LED_Pin = LED_BUILTIN>
 #else
     template<uint8_t LED_Pin>
 #endif
-    static void IRAM_ATTR Blinken() { // should be run once in 200 ms or so
+    static void AVP_RAM_ATTR Blinken() { // should be run once in 200 ms or so
       static int Counter = 0;
 
       switch(ConnStatus) {
@@ -98,8 +99,11 @@ namespace avp {
                                                         // connection status
     };
 
-    static const Options_t &DefaultOpts() { static Options_t Opts{NAME, "L", "group224", idle}; return Opts; } // Default
-    
+    static const Options_t &DefaultOpts() {
+      static Options_t Opts{NAME, "L", "group224", Blinken};
+      return Opts;
+    } // Default
+
     static inline bool OTA_IsInProgress;
 
     static constexpr uint8_t STR_SIZE = 32; ///< ssid and password string sizes
@@ -110,7 +114,7 @@ namespace avp {
     static inline status_indication_func_t status_indication_func;
     static inline uint8_t BSSID[6]; ///< BSSID of the best AP
 
-    public:
+  public:
     /**
      * @brief there is static class, no contructor. begin() initializes the WiFI connection
      *
@@ -121,7 +125,7 @@ namespace avp {
      * @param default_pass if stored configuration failed to connect try this one
      */
     static void begin(const char *Name_, const char *default_ssid, const char *default_pass,
-      status_indication_func_t status_indication_func_ = idle) {
+      status_indication_func_t status_indication_func_) {
       if(ConnStatus != Status_t::BEFORE_BEGIN) return; // make sure we run begin once only
 
       ConnStatus = Status_t::IDLE;
@@ -130,10 +134,13 @@ namespace avp {
       ssid = default_ssid;
       pass = default_pass;
       status_indication_func = status_indication_func_;
+      
+      // I have to setup Blinken here to see all connection process
+      avp::HW_Timer_ms<>::CreateTimer([]() { status_indication_func(); return true; }, 200, true);
 
       WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
                                   // connect to the one with the best RSSI
-      // but if I have some stored credentials use them instead of default ones
+                                  // but if I have some stored credentials use them instead of default ones
 #ifdef ESP32
       LittleFS.begin(true);
 #endif
@@ -153,7 +160,7 @@ namespace avp {
 
       MDNS.begin(Name);
 
-      #if defined(DO_OTA) && DO_OTA
+#if defined(DO_OTA) && DO_OTA
       ArduinoOTA.setHostname(Name);
 
       ArduinoOTA.onStart([]() {
@@ -188,7 +195,7 @@ namespace avp {
       });
       ArduinoOTA.begin();
 #endif
-    
+
     } // constructor
 
     static void begin(const Options_t &Opts = DefaultOpts()) {

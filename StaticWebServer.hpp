@@ -16,9 +16,12 @@
 
 #ifdef ESP32
 #include <WebServer.h>
+#include <HTTPUpdateServer.h>
 #elif defined(ESP8266)
 #include <ESP8266WebServer.h>
 using WebServer = ESP8266WebServer;
+#include <ESP8266HTTPUpdateServer.h>
+using HTTPUpdateServer = ESP8266HTTPUpdateServer;
 #else
 #error "Unsupported platform"
 #endif
@@ -99,7 +102,7 @@ namespace avp {
       Options = Opts;
       Log::begin(Options.LogSize);
       StaticWiFi_Conn::begin(Opts);
-      
+
       on("/", []() {
         static String Resp;
         Resp.reserve(200);
@@ -171,77 +174,33 @@ namespace avp {
         ESP.restart();
       });
 
-      on("/update", []() {
-        send("text/html",
-          F("<!DOCTYPE html><html><head>"
-            "<title>ESP OTA Update</title>"
-            "</head><body>"
-            "<h1>ESP Firmware Update</h1>"
-            "<p>Upload new firmware (.bin file):</p>"
-            "<form method='POST' action='/upload' enctype='multipart/form-data'>"
-            "<input type='file' name='update' accept='.bin'>"
-            "<input type='submit' value='Update'>"
-            "</form></body></html>"));
-      });
-
-      on("/upload", []() {
-        // auto &syncReq = static_cast<SyncWebServer::Request_t &>(rReq);
-        // s.sendHeader("Connection", "close");
-        send("text/plain", (Update.hasError()) ? "FAIL" : "OK");
-      }, []() {
-        HTTPUpload &upload = s.upload();
-
-        if(upload.status == UPLOAD_FILE_START) {
-          debug_printf("Update: %s\n", upload.filename.c_str());
-#ifdef ESP8266
-          WiFiUDP::stopAll();
-          if(!Update.begin((ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000)) {
-#endif
+      static HTTPUpdateServer httpUpdater;
+      
 #ifdef ESP32
-            if(!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      httpUpdater.setup(&s);
+#else
+      httpUpdater.setup(&s, "/update");
 #endif
-              Update.printError(DebugPrint);
-            }
-          } else if(upload.status == UPLOAD_FILE_WRITE) {
-            if(Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-              Update.printError(DebugPrint);
-            }
-          } else if(upload.status == UPLOAD_FILE_END) {
-            if(Update.end(true)) {
-              debug_printf("Update Success: %u bytes\n", upload.totalSize);
-              send("text/plain", "Update successful! Device rebooting.");
-              delay(1000);
-              ESP.restart();
-            } else {
-              Update.printError(DebugPrint);
-              send("text/plain", "Update failed.", HTTP::Response_t::INTERNAL_SERVER_ERROR);
-            }
-          } else if(upload.status == UPLOAD_FILE_ABORTED) {
-            Update.end();
-            send("text/plain", "Update aborted.", HTTP::Response_t::INTERNAL_SERVER_ERROR);
-          }
-        }
-      );
 
       s.begin();
     } // begin
 
     static const String &ShowWiFiAndEntry() {
-        static String Resp;
-        Resp.reserve(200);
+      static String Resp;
+      Resp.reserve(200);
 
-        Resp = F("</ol></p><p><b>WiFi networks:</b></p>");
-        Resp += "<p>";
-        Resp += scan();
-        Resp += F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' length=");
-        Resp += STR_SIZE - 1;
-        Resp += " value='";
-        Resp += WiFi.SSID();
-        Resp += "'><input name='pass' length=";
-        Resp += STR_SIZE - 1;
-        Resp += "><input type='submit'></html>";
+      Resp = F("</ol></p><p><b>WiFi networks:</b></p>");
+      Resp += "<p>";
+      Resp += scan();
+      Resp += F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' length=");
+      Resp += STR_SIZE - 1;
+      Resp += " value='";
+      Resp += WiFi.SSID();
+      Resp += "'><input name='pass' length=";
+      Resp += STR_SIZE - 1;
+      Resp += "><input type='submit'></html>";
 
-        return Resp;
+      return Resp;
     } // ShowWiFiAndEntry
-    }; // class StaticWebServer
-  } // namespace avp
+  }; // class StaticWebServer
+} // namespace avp
