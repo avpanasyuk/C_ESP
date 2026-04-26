@@ -185,7 +185,12 @@ public:
       debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1],
                    BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
       WiFi.mode(WIFI_STA);
-      if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
+	if(Name != nullptr && Name[0]) {
+#if defined(ESP32)
+		WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE); // hack to make sure setHostname works
+#endif
+		WiFi.setHostname(Name);
+	  }
       WiFi.begin(SSID, Pass, 0, BSSID);
       ConnStatus = TRYING_TO_CONNECT;
       WiFi.waitForConnectResult();
