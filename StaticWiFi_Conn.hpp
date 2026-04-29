@@ -14,11 +14,15 @@
 
 #if defined(ESP8266)
 #include <ESP8266WiFi.h> // https://github.com/esp8266/Arduino
+#include <ESP8266WiFiMulti.h>
 #include <ESP8266mDNS.h>
 #define WIFI_AUTH_OPEN AUTH_OPEN
-#else
+#endif
+
+#if ESP32
 #include <ESPmDNS.h>
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #endif
 
 #include <LittleFS.h> // I do not want to use autoConnect, lets store SSID and password
@@ -44,6 +48,8 @@ static const char *LittleFS_AUTH = "/net_auth.txt";
 #include "hw_timer.hpp" // I have to run Blinken from hardware interrupt, as loop() runs after everything
 // is set already
 #include "service.h"
+
+WiFiMulti wifiMulti;
 
 namespace avp {
   struct StaticWiFi_Conn {
@@ -112,7 +118,8 @@ namespace avp {
     static inline const char *Name;
     static inline String ssid, pass;
     static inline status_indication_func_t status_indication_func;
-    static inline uint8_t BSSID[6]; ///< BSSID of the best AP
+    static inline String ConnectedNode;
+    // static inline uint8_t BSSID[6]; ///< BSSID of the best AP
 
   public:
     /**
@@ -134,13 +141,15 @@ namespace avp {
       ssid = default_ssid;
       pass = default_pass;
       status_indication_func = status_indication_func_;
-      
-      // I have to setup Blinken here to see all connection process
-      avp::HW_Timer_ms<>::CreateTimer([]() { status_indication_func(); return true; }, 200, true);
 
-      WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
-                                  // connect to the one with the best RSSI
-                                  // but if I have some stored credentials use them instead of default ones
+      // I have to setup Blinken here to see all connection process
+      avp::HW_Timer_ms<>::CreateTimer([]() {
+        status_indication_func();
+        return true;
+      },
+        200, true);
+      WiFi.setAutoReconnect(false);
+      WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I use multiWiFi to do that
 #ifdef ESP32
       LittleFS.begin(true);
 #endif
@@ -155,6 +164,7 @@ namespace avp {
           debug_printf("Stored credentials: %s, %s\n", ssid.c_str(), pass.c_str());
         } else debug_puts("Failed to open stored credentials file!\n");
       } else debug_puts("No stored credentials found!\n");
+
       if(ssid == "") open_AP();
       else ConnectToBestAP(ssid.c_str(), pass.c_str());
 
@@ -203,20 +213,16 @@ namespace avp {
     } // begin
 
     static void ConnectToBestAP(const char *SSID, const char *Pass) {
-      if(FindBestAP(SSID, BSSID)) {
-        debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
-        WiFi.mode(WIFI_STA);
-        if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
-        WiFi.begin(SSID, Pass, 0, BSSID);
-        ConnStatus = Status_t::TRYING_TO_CONNECT;
-        WiFi.waitForConnectResult();
+      WiFi.mode(WIFI_STA);
+      if(Name != nullptr && Name[0]) {
+#if defined(ESP32)
+        WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE); // hack to make sure setHostname works
+#endif
+        WiFi.setHostname(Name);
       }
-      if(WiFi.isConnected()) post_connection();
-      else {
-        LittleFS.remove(LittleFS_AUTH); // remove stored credentials
-        debug_puts("Stored credentials removed!\n");
-        open_AP();
-      } // defaults are not present or do not work, go to AP mode
+      wifiMulti.addAP(SSID, Pass);
+      if(wifiMulti.run() == WL_CONNECTED) post_connection();
+      else open_AP();
     } // ConnectToBestAP
 
     static void open_AP() {
@@ -231,18 +237,10 @@ namespace avp {
     static void post_connection() {
       ip = WiFi.localIP();
       debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
+      ConnectedNode = String("SSID: ") + WiFi.SSID() +
+                      ", BSSID: " + WiFi.BSSIDstr() + ", RSSI: " + WiFi.RSSI();
       ConnStatus = Status_t::CONNECTED;
-      WiFi.setAutoConnect(false);
-      WiFi.setAutoReconnect(false);
     } // post_connection
-
-    static void TryToConnect() {
-      if(!WiFi.isConnected()) {
-        ConnectToBestAP(ssid.c_str(), pass.c_str());
-        if(WiFi.isConnected()) post_connection();
-        else open_AP();
-      }
-    } // TryToConnect
 
     static Status_t GetStatus() { return ConnStatus; }
     static bool IsConnected() { return GetStatus() == Status_t::CONNECTED; }
@@ -263,10 +261,7 @@ namespace avp {
       Resp += ", Free Heap (bytes): ";
       Resp += ESP.getFreeHeap();
       Resp += "<br>Connected to ";
-      Resp += WiFi.SSID();
-      Resp += " (BSSID: ";
-      Resp += BSSIDtoString(BSSID);
-      Resp += ")";
+      Resp += ConnectedNode;
       return Resp;
     } // Greeting
 
@@ -282,8 +277,12 @@ namespace avp {
     } // StoreAUTH
 
     static void call_in_loop() {
-      static avp::TimePeriod1<10UL * 60 * 1000, millis> TP;
-      if(TP.Expired()) TryToConnect(); // try to connect every 10 minutes
+      //      static avp::TimePeriod1<10UL * 60 * 1000, millis> TP;
+      //      if(TP.Expired()) TryToConnect(); // try to connect every 10 minutes
+      if(!WiFi.isConnected()) {
+        if(wifiMulti.run(10000) == WL_CONNECTED) post_connection();
+        else open_AP();
+      }
 
 #if defined(DO_OTA) && DO_OTA
       ArduinoOTA.handle();
@@ -294,39 +293,5 @@ namespace avp {
       // delay(1);
       yield();
     } // call_in_loop
-
-    static String BSSIDtoString(const uint8_t *BSSID) {
-      return avp::String_printf("%02x:%02x:%02x:%02x:%02x:%02x", BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
-    } // BSSIDtoString
-
-    /**
-     * @brief scans all available networks and returns a table
-     *
-     * @return const String& - HTML formatted table
-     */
-    static const String &scan() {
-      static String WiFi_Around;
-      WiFi_Around.reserve(300); // reserve buffer for response to avoid dynamic memory allocation
-      // Scan for WiFi networks
-      int n = WiFi.scanNetworks(false, false);
-
-      WiFi_Around = "<table><tr><th>SSID</th><th>RSSI</th><th>Protected</th><th>BSSID</th></tr>";
-      for(int i = 0; i < n; ++i) {
-        // Print SSID and RSSI for each network found
-        WiFi_Around += "<tr>";
-        WiFi_Around += "<td>";
-        WiFi_Around += WiFi.SSID(i);
-        WiFi_Around += "</td><td>";
-        WiFi_Around += WiFi.RSSI(i);
-        WiFi_Around += "</td><td>";
-        WiFi_Around += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*";
-        WiFi_Around += "</td><td>";
-        WiFi_Around += BSSIDtoString(WiFi.BSSID(i));
-        WiFi_Around += "</td></tr>";
-      }
-      WiFi_Around += "</table>";
-      WiFi.scanDelete();
-      return WiFi_Around;
-    } // scan
   }; // struct StaticWiFi_Conn
 } // namespace avp

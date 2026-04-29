@@ -202,5 +202,33 @@ namespace avp {
 
       return Resp;
     } // ShowWiFiAndEntry
+ 
+    /**
+     * @brief scans all available networks and returns a table
+     *
+     * @return const String& - HTML formatted table
+     */
+    static const String &scan() {
+      static String WiFi_Around;
+      WiFi_Around.reserve(300); // reserve buffer for response to avoid dynamic memory allocation
+      // Scan for WiFi networks
+      int n = WiFi.scanNetworks(false, false);
+
+      WiFi_Around = "<table><tr><th>SSID</th><th>RSSI</th><th>Protected</th><th>BSSID</th></tr>";
+      for(int i = 0; i < n; ++i) {
+        // Print SSID and RSSI for each network found
+        WiFi_Around += "<tr>";
+        WiFi_Around += "<td>";
+        WiFi_Around += WiFi.SSID(i);
+        WiFi_Around += "</td><td>";
+        WiFi_Around += WiFi.RSSI(i);
+        WiFi_Around += "</td><td>";
+        WiFi_Around += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*";
+        WiFi_Around += "</td></tr>";
+      }
+      WiFi_Around += "</table>";
+      WiFi.scanDelete();
+      return WiFi_Around;
+    } // scan
   }; // class StaticWebServer
 } // namespace avp
