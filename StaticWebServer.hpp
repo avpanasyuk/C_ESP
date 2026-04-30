@@ -28,7 +28,7 @@ using HTTPUpdateServer = ESP8266HTTPUpdateServer;
 
 #include "C_ARDUINO/General.h"
 #include "StaticWiFi_Conn.hpp"
-#include "Log.hpp"
+#include "HTML_Log.hpp"
 
 namespace avp {
   class avp::Print DebugPrint(debug_puts);
@@ -68,6 +68,11 @@ namespace avp {
     static void call_in_loop() {
       StaticWiFi_Conn::call_in_loop();
       s.handleClient();
+      if(Update.hasError()) {
+        StreamString str;
+        Update.printError(str);
+        debug_puts(str.c_str());
+      }
     };
 
     //---------------- server functions -----------------------------
@@ -100,7 +105,7 @@ namespace avp {
 
     static void begin(const Options_t &Opts = DefaultOpts()) {
       Options = Opts;
-      Log::begin(Options.LogSize);
+      HTML_Log::begin(Options.LogSize);
       StaticWiFi_Conn::begin(Opts);
 
       on("/", []() {
@@ -165,7 +170,7 @@ namespace avp {
       });
 
       on("/log", []() {
-        send("text/html", avp::GenerateHTML(Log::Get(), 2, "LOG"));
+        send("text/html", avp::GenerateHTML(HTML_Log::Get(), 2, "LOG"));
       });
 
       on("/reset", []() {
@@ -175,7 +180,7 @@ namespace avp {
       });
 
       static HTTPUpdateServer httpUpdater;
-      
+
 #ifdef ESP32
       httpUpdater.setup(&s);
 #else

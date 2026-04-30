@@ -63,6 +63,8 @@ namespace avp {
     uint8_t BSSID_out[6];
     if(!FindBestAP(SSID, BSSID_out)) return false; // until there is WiFi nothing to be done
     // Keep your WiFi and OTA setup
+    WiFi.setPhyMode(WIFI_PHY_MODE_11N);
+    WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
 #ifdef NAME
     WiFi.setHostname(NAME);

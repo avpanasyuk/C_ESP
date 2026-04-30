@@ -67,6 +67,7 @@ namespace avp {
       static int Counter = 0;
 
       switch(ConnStatus) {
+      case Status_t::BEFORE_BEGIN:
       case Status_t::IDLE:
         avp::SetPin<LED_Pin>(); // LED off
         break;
@@ -134,9 +135,13 @@ namespace avp {
       ssid = default_ssid;
       pass = default_pass;
       status_indication_func = status_indication_func_;
-      
+
       // I have to setup Blinken here to see all connection process
-      avp::HW_Timer_ms<>::CreateTimer([]() { status_indication_func(); return true; }, 200, true);
+      avp::HW_Timer_ms<>::CreateTimer([]() {
+        status_indication_func();
+        return true;
+      },
+        200, true);
 
       WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
                                   // connect to the one with the best RSSI
@@ -207,6 +212,8 @@ namespace avp {
         debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
         WiFi.mode(WIFI_STA);
         if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
+        WiFi.setPhyMode(WIFI_PHY_MODE_11N);
+        WiFi.persistent(false);
         WiFi.begin(SSID, Pass, 0, BSSID);
         ConnStatus = Status_t::TRYING_TO_CONNECT;
         WiFi.waitForConnectResult();
@@ -234,6 +241,17 @@ namespace avp {
       ConnStatus = Status_t::CONNECTED;
       WiFi.setAutoConnect(false);
       WiFi.setAutoReconnect(false);
+      WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected &event) {
+        debug_printf("Disconnected, reason: %d\n", event.reason);
+      });
+
+      WiFi.onStationModeConnected([](const WiFiEventStationModeConnected &event) {
+        debug_puts("Connected to AP (no IP yet)\n");
+      });
+
+      WiFi.onStationModeGotIP([](const WiFiEventStationModeGotIP &event) {
+        debug_printf("Got IP: %s\n", event.ip.toString().c_str());
+      });
     } // post_connection
 
     static void TryToConnect() {
