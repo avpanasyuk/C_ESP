@@ -136,7 +136,8 @@ namespace avp {
           delay(1000);
           WiFi.disconnect();
           delay(1000);
-          ConnectToBestAP(qsid.c_str(), qpass.c_str());
+          scanNetworks(false, qsid.c_str());
+          BeginConnectingToBestAP(qsid.c_str(), qpass.c_str());
           if(WiFi.waitForConnectResult() == WL_CONNECTED) StoreAUTH(qsid.c_str(), qpass.c_str());
           // delay(1000); server is still running, no point to reset
           // ESP.restart();
@@ -192,13 +193,13 @@ namespace avp {
       Resp = F("</ol></p><p><b>WiFi networks:</b></p>");
       Resp += "<p>";
       Resp += scan();
-      Resp += F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' length=");
+      Resp += F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' maxlength=");
       Resp += STR_SIZE - 1;
       Resp += " value='";
       Resp += WiFi.SSID();
-      Resp += "'><input name='pass' length=";
+      Resp += "'><input name='pass' maxlength=";
       Resp += STR_SIZE - 1;
-      Resp += "><input type='submit'></html>";
+      Resp += "><input type='submit'>";
 
       return Resp;
     } // ShowWiFiAndEntry

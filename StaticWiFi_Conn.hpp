@@ -25,10 +25,15 @@
                       // in LittleFS. you should put board_build.filesystem = littlefs in
                       // platformio.ini
 
-static const char *LittleFS_AUTH = "/net_auth.txt";
+inline constexpr const char *LittleFS_AUTH = "/net_auth.txt";
 
 #if defined(DO_OTA) && DO_OTA
 #include <ArduinoOTA.h>
+#endif
+
+#if defined(ESP8266)
+#define WIFI_MODE_STA WIFI_STA
+#define WIFI_MODE_AP WIFI_AP
 #endif
 
 #ifndef NAME
@@ -47,7 +52,7 @@ static const char *LittleFS_AUTH = "/net_auth.txt";
 
 namespace avp {
   struct StaticWiFi_Conn {
-    static inline enum class Status_t {
+    static inline volatile enum class Status_t {
       BEFORE_BEGIN,
       IDLE,
       TRYING_TO_CONNECT,
@@ -106,13 +111,15 @@ namespace avp {
 
     static inline bool OTA_IsInProgress;
 
-    static constexpr uint8_t STR_SIZE = 32; ///< ssid and password string sizes
+    static constexpr uint8_t STR_SIZE = 32;         ///< ssid and password string sizes
+    static constexpr int32_t MinRSSIdiffToJump = 8; // dB
   protected:
     static inline IPAddress ip;
     static inline const char *Name;
     static inline String ssid, pass;
     static inline status_indication_func_t status_indication_func;
-    static inline uint8_t BSSID[6]; ///< BSSID of the best AP
+    static inline avp::TimePeriod1<10UL * 1000, millis> ConnectionTO;           // 10 seconds
+    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // 10 seconds
 
   public:
     /**
@@ -134,10 +141,15 @@ namespace avp {
       ssid = default_ssid;
       pass = default_pass;
       status_indication_func = status_indication_func_;
-      
-      // I have to setup Blinken here to see all connection process
-      avp::HW_Timer_ms<>::CreateTimer([]() { status_indication_func(); return true; }, 200, true);
 
+      // I have to setup Blinken here to see all connection process
+      avp::HW_Timer_ms<>::CreateTimer([]() {
+        status_indication_func();
+        return true;
+      },
+        200, true);
+
+      WiFi.setAutoReconnect(false);
       WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
                                   // connect to the one with the best RSSI
                                   // but if I have some stored credentials use them instead of default ones
@@ -151,13 +163,24 @@ namespace avp {
         File f = LittleFS.open(LittleFS_AUTH, "r");
         if(f) {
           ssid = f.readStringUntil('\n');
+          ssid.trim();
           pass = f.readStringUntil('\n');
+          pass.trim();
           debug_printf("Stored credentials: %s, %s\n", ssid.c_str(), pass.c_str());
         } else debug_puts("Failed to open stored credentials file!\n");
       } else debug_puts("No stored credentials found!\n");
-      if(ssid == "") open_AP();
-      else ConnectToBestAP(ssid.c_str(), pass.c_str());
 
+      if(ssid == "") open_AP();
+      else {
+#ifdef NAME
+        WiFi.setHostname(NAME);
+#endif
+        WiFi.mode(WIFI_STA);
+        scanNetworks(false, ssid.c_str());
+        BeginConnectingToBestAP(ssid.c_str(), pass.c_str());
+        WiFi.waitForConnectResult();
+        CheckConnection();
+      }
       MDNS.begin(Name);
 
 #if defined(DO_OTA) && DO_OTA
@@ -202,56 +225,68 @@ namespace avp {
       begin(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_);
     } // begin
 
-    static void ConnectToBestAP(const char *SSID, const char *Pass) {
-      if(FindBestAP(SSID, BSSID)) {
-        debug_printf("Trying to connect to %s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", SSID, BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
-        WiFi.mode(WIFI_STA);
-        if(Name != nullptr && Name[0]) WiFi.setHostname(Name);
-        WiFi.begin(SSID, Pass, 0, BSSID);
-        ConnStatus = Status_t::TRYING_TO_CONNECT;
-        WiFi.waitForConnectResult();
+    /**
+     * @brief Should be called after scanNetworks has run or repeatedly if it was started asynchroneously
+     *
+     * @param SSID
+     * @param Pass
+     */
+    static void BeginConnectingToBestAP(const char *SSID, const char *Pass) {
+      uint8_t BestRSSI_i;
+      const char *ErrorMsg(FindTheBestAPinScan(BestRSSI_i));
+      if(ErrorMsg != nullptr) debug_puts(ErrorMsg);
+      else {                                                            // found some APs
+        if(WiFi.status() == WL_CONNECTED) {                             // we will have to compare this scan RSSI with what we have now
+          if(WiFi.RSSI(BestRSSI_i) > WiFi.RSSI() + MinRSSIdiffToJump) { // best RSSI is way better
+            WiFi.disconnect();
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
+            ConnStatus = Status_t::TRYING_TO_CONNECT;
+            ConnectionTO.Reset();
+          }
+        } else { // not connected
+          WiFi.mode(WIFI_STA);
+          WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
+          ConnStatus = Status_t::TRYING_TO_CONNECT;
+          ConnectionTO.Reset();
+        }
+        // WiFi.waitForConnectResult(); // let's not do blocking
       }
-      if(WiFi.isConnected()) post_connection();
-      else {
-        LittleFS.remove(LittleFS_AUTH); // remove stored credentials
-        debug_puts("Stored credentials removed!\n");
+      WiFi.scanDelete();
+    } // BeginConnectingToBestAP
+
+    static void CheckConnection() {
+      switch(WiFi.status()) {
+      case WL_CONNECTED:
+        ip = WiFi.localIP();
+        debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
+        ConnStatus = Status_t::CONNECTED;
+        break;
+      case WL_IDLE_STATUS:
+        break;
+      case WL_DISCONNECTED:
+        if(!ConnectionTO.JustCheck()) break; // Timout is not over yet
+      default:
         open_AP();
-      } // defaults are not present or do not work, go to AP mode
-    } // ConnectToBestAP
+        break;
+      }
+    } // CheckConnection()
 
     static void open_AP() {
-      WiFi.mode(WIFI_AP);
+      WiFi.mode(WIFI_AP); // WIFI_AP does not allow scans
       WiFi.softAP(Name, "");
       ip = WiFi.softAPIP();
+      AP_MODE_ACTIVE_TO.Reset();
       ConnStatus = Status_t::AP_MODE;
       debug_printf("Waiting for connection in AP mode, IP:%s!\n",
         (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
     } // open_AP
 
-    static void post_connection() {
-      ip = WiFi.localIP();
-      debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
-      ConnStatus = Status_t::CONNECTED;
-      WiFi.setAutoConnect(false);
-      WiFi.setAutoReconnect(false);
-    } // post_connection
-
-    static void TryToConnect() {
-      if(!WiFi.isConnected()) {
-        ConnectToBestAP(ssid.c_str(), pass.c_str());
-        if(WiFi.isConnected()) post_connection();
-        else open_AP();
-      }
-    } // TryToConnect
-
-    static Status_t GetStatus() { return ConnStatus; }
-    static bool IsConnected() { return GetStatus() == Status_t::CONNECTED; }
-
     static String getIP() { return ip.toString(); }
 
     static const String &Greeting() {
       static String Resp;
-      Resp.reserve(200);
+      Resp.reserve(512);
       Resp = "Hello from <b>";
       Resp += Name;
       Resp += "</b> at IP: ";
@@ -262,15 +297,20 @@ namespace avp {
       Resp += ESP.getFlashChipSize();
       Resp += ", Free Heap (bytes): ";
       Resp += ESP.getFreeHeap();
-      Resp += "<br>Connected to ";
-      Resp += WiFi.SSID();
-      Resp += " (BSSID: ";
-      Resp += BSSIDtoString(BSSID);
-      Resp += ")";
+      if(WiFi.getMode() == WIFI_MODE_STA) {
+        Resp += "<br>Connected to ";
+        Resp += WiFi.SSID();
+        Resp += " (BSSID: ";
+        Resp += BSSIDtoString(WiFi.BSSID());
+        Resp += ")";
+      } else Resp += ", (AP mode)";
       return Resp;
     } // Greeting
 
     static void StoreAUTH(const char *SSID, const char *Pass) {
+      ssid = SSID;
+      pass = Pass;
+
       File f = LittleFS.open(LittleFS_AUTH, "w");
       if(f) {
         f.print(SSID);
@@ -283,7 +323,27 @@ namespace avp {
 
     static void call_in_loop() {
       static avp::TimePeriod1<10UL * 60 * 1000, millis> TP;
-      if(TP.Expired()) TryToConnect(); // try to connect every 10 minutes
+      if(WiFi.getMode() == WIFI_MODE_STA) {
+        if(WiFi.scanComplete() != WIFI_SCAN_RUNNING &&
+           !OTA_IsInProgress && TP.Expired()) {
+          // try to find better AP every 10 minutes
+          scanNetworks(true, ssid.c_str());
+        }
+
+        if(WiFi.scanComplete() > 0)
+          BeginConnectingToBestAP(ssid.c_str(), pass.c_str());
+      }
+
+      if(ConnStatus == Status_t::AP_MODE) { // WiFi.getMode() in WIFI_AP mode has no clue
+        if(WiFi.softAPgetStationNum() > 0) AP_MODE_ACTIVE_TO.Reset();
+        if(AP_MODE_ACTIVE_TO.Expired()) { // nothing is using AP, trying to connect again
+          scanNetworks(false, ssid.c_str());
+          if(WiFi.scanComplete() > 0)
+            BeginConnectingToBestAP(ssid.c_str(), pass.c_str());
+        }
+      }
+
+      if(ConnStatus == Status_t::TRYING_TO_CONNECT) CheckConnection();
 
 #if defined(DO_OTA) && DO_OTA
       ArduinoOTA.handle();
@@ -294,39 +354,5 @@ namespace avp {
       // delay(1);
       yield();
     } // call_in_loop
-
-    static String BSSIDtoString(const uint8_t *BSSID) {
-      return avp::String_printf("%02x:%02x:%02x:%02x:%02x:%02x", BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
-    } // BSSIDtoString
-
-    /**
-     * @brief scans all available networks and returns a table
-     *
-     * @return const String& - HTML formatted table
-     */
-    static const String &scan() {
-      static String WiFi_Around;
-      WiFi_Around.reserve(300); // reserve buffer for response to avoid dynamic memory allocation
-      // Scan for WiFi networks
-      int n = WiFi.scanNetworks(false, false);
-
-      WiFi_Around = "<table><tr><th>SSID</th><th>RSSI</th><th>Protected</th><th>BSSID</th></tr>";
-      for(int i = 0; i < n; ++i) {
-        // Print SSID and RSSI for each network found
-        WiFi_Around += "<tr>";
-        WiFi_Around += "<td>";
-        WiFi_Around += WiFi.SSID(i);
-        WiFi_Around += "</td><td>";
-        WiFi_Around += WiFi.RSSI(i);
-        WiFi_Around += "</td><td>";
-        WiFi_Around += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*";
-        WiFi_Around += "</td><td>";
-        WiFi_Around += BSSIDtoString(WiFi.BSSID(i));
-        WiFi_Around += "</td></tr>";
-      }
-      WiFi_Around += "</table>";
-      WiFi.scanDelete();
-      return WiFi_Around;
-    } // scan
   }; // struct StaticWiFi_Conn
 } // namespace avp

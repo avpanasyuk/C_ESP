@@ -8,6 +8,7 @@
 #include "C_General/General.hpp"
 #include "C_General/Error.hpp"
 #include "C_ESP/service.h"
+#include "C_ARDUINO/General.h"
 
 namespace avp {
   const String &GenerateHTML(const char *html_body, uint16_t AutoRefresh_s, const char *title) {
@@ -35,40 +36,59 @@ namespace avp {
     return out;
   } // GenerateHTML
 
-  bool FindBestAP(const char *SSID, uint8_t *BSSID_out) {
-    avp::ReleaseWhenOutOfScope<int> n(
+  void scanNetworks(bool Async, const char *SSID) {
+    auto OldMode = WiFi.getMode(); 
+    if(OldMode != WIFI_MODE_STA && OldMode != WIFI_MODE_APSTA) WiFi.mode(WIFI_AP_STA); 
 #if defined(ESP8266)
-      WiFi.scanNetworks(false, false, 0, (uint8_t *)SSID),
+    WiFi.scanNetworks(Async, false, 0, (uint8_t *)SSID);
 #else
-      WiFi.scanNetworks(false, false, false, 300U, 0, SSID, nullptr),
+    WiFi.scanNetworks(Async, false, false, 300U, 0, SSID, nullptr);
 #endif
-      [](int) {
-        WiFi.scanDelete();
-      });
+    if(OldMode != WIFI_MODE_APSTA) WiFi.mode(OldMode);
+  } // scanNetworks
 
-    int BestRSSI_i = -1;
-    int32_t BestRSSI = INT32_MIN;
+  const char *FindTheBestAPinScan(uint8_t &BestRSSI_i) {
+    if(WiFi.scanComplete() <= 0) return "Nothing in the scan!";
 
-    for(int i = 0; i < n; ++i) {
+    int32_t BestRSSI = INT32_MIN; // initial lowwest possible value
+
+    for(int i = 0; i < WiFi.scanComplete(); ++i) {
       uint8_t *BSSID = WiFi.BSSID(i);
-      debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i), BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+      debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n",
+        WiFi.SSID(i).c_str(), WiFi.RSSI(i), BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
       if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
     }
-    memcpy(BSSID_out, WiFi.BSSID(BestRSSI_i), 6);
+    return nullptr;
+  } // FindTheBestAPinScan
 
-    return BestRSSI_i != -1;
-  } // FindBestAP
+  String BSSIDtoString(const uint8_t *BSSID) {
+    if (!BSSID) return "00:00:00:00:00:00";
+    return String_printf("%02x:%02x:%02x:%02x:%02x:%02x", 
+      BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+  } // BSSIDtoString
 
-  bool TryToConnectWiFi(const char *SSID, const char *PWD) {
-    uint8_t BSSID_out[6];
-    if(!FindBestAP(SSID, BSSID_out)) return false; // until there is WiFi nothing to be done
-    // Keep your WiFi and OTA setup
-    WiFi.mode(WIFI_STA);
-#ifdef NAME
-    WiFi.setHostname(NAME);
-#endif
-    WiFi.begin(SSID, PWD, 0, BSSID_out);
-    WiFi.waitForConnectResult(20000UL);
-    return WiFi.isConnected();
-  }
+  const String &scan() {
+    static String WiFi_Around;
+    WiFi_Around.reserve(512); // reserve buffer for response to avoid dynamic memory allocation
+    // Scan for WiFi networks
+    int n = WiFi.scanNetworks(false, false);
+    WiFi_Around.clear();
+    WiFi_Around += "<table><tr><th>SSID</th><th>RSSI</th><th>Protected</th><th>BSSID</th></tr>";
+    for(int i = 0; i < n; ++i) {
+      // Print SSID and RSSI for each network found
+      WiFi_Around += "<tr>";
+      WiFi_Around += "<td>";
+      WiFi_Around += WiFi.SSID(i);
+      WiFi_Around += "</td><td>";
+      WiFi_Around += WiFi.RSSI(i);
+      WiFi_Around += "</td><td>";
+      WiFi_Around += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*";
+      WiFi_Around += "</td><td>";
+      WiFi_Around += BSSIDtoString(WiFi.BSSID(i));
+      WiFi_Around += "</td></tr>";
+    }
+    WiFi_Around += "</table>";
+    WiFi.scanDelete();
+    return WiFi_Around;
+  } // scan
 } // namespace avp
