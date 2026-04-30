@@ -72,6 +72,7 @@ namespace avp {
       static int Counter = 0;
 
       switch(ConnStatus) {
+      case Status_t::BEFORE_BEGIN:
       case Status_t::IDLE:
         avp::SetPin<LED_Pin>(); // LED off
         break;
@@ -240,7 +241,7 @@ namespace avp {
           if(WiFi.RSSI(BestRSSI_i) > WiFi.RSSI() + MinRSSIdiffToJump) { // best RSSI is way better
             WiFi.disconnect();
             WiFi.mode(WIFI_STA);
-            WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
+        WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
             ConnStatus = Status_t::TRYING_TO_CONNECT;
             ConnectionTO.Reset();
           }
@@ -273,7 +274,7 @@ namespace avp {
     } // CheckConnection()
 
     static void open_AP() {
-      WiFi.mode(WIFI_AP); // WIFI_AP does not allow scans
+      WiFi.mode(WIFI_AP);
       WiFi.softAP(Name, "");
       ip = WiFi.softAPIP();
       AP_MODE_ACTIVE_TO.Reset();

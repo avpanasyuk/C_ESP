@@ -44,25 +44,25 @@ namespace avp {
 #endif
 
   template<uint8_t pin, bool val>
-  void inline __attribute__((always_inline)) WritePin() { DIGITAL_WRITE_BODY }
+  void FORCE_INLINE WritePin() { DIGITAL_WRITE_BODY }
 
   template<uint8_t pin>
-  void inline __attribute__((always_inline)) WritePin(bool val) { DIGITAL_WRITE_BODY }
-  void inline __attribute__((always_inline)) WritePin(uint8_t pin, bool val) { DIGITAL_WRITE_BODY }
+  void FORCE_INLINE WritePin(bool val) { DIGITAL_WRITE_BODY }
+  void FORCE_INLINE WritePin(uint8_t pin, bool val) { DIGITAL_WRITE_BODY }
 
   template<uint8_t pin>
-  bool inline __attribute__((always_inline)) ReadPin() { DIGITAL_READ_BODY }
-  bool inline __attribute__((always_inline)) ReadPin(uint8_t pin) { DIGITAL_READ_BODY }
+  bool FORCE_INLINE ReadPin() { DIGITAL_READ_BODY }
+  bool FORCE_INLINE ReadPin(uint8_t pin) { DIGITAL_READ_BODY }
 
   template<uint8_t pin>
-  void inline __attribute__((always_inline)) TogglePin() { DIGITAL_TOGGLE_BODY }
-  void inline __attribute__((always_inline)) TogglePin(uint8_t pin) { DIGITAL_TOGGLE_BODY }
+  void FORCE_INLINE TogglePin() { DIGITAL_TOGGLE_BODY }
+  void FORCE_INLINE TogglePin(uint8_t pin) { DIGITAL_TOGGLE_BODY }
 
   template<uint8_t pin>
-  void inline __attribute__((always_inline)) SetPin() { WritePin<pin, 1>(); }
-  void inline __attribute__((always_inline)) SetPin(uint8_t pin) { WritePin(pin, 1); }
+  void FORCE_INLINE SetPin() { WritePin<pin, 1>(); }
+  void FORCE_INLINE SetPin(uint8_t pin) { WritePin(pin, 1); }
 
   template<uint8_t pin>
-  void inline __attribute__((always_inline)) ClearPin() { WritePin<pin, 0>(); }
-  void inline __attribute__((always_inline)) ClearPin(uint8_t pin) { WritePin(pin, 0); }
+  void FORCE_INLINE ClearPin() { WritePin<pin, 0>(); }
+  void FORCE_INLINE ClearPin(uint8_t pin) { WritePin(pin, 0); }
 } // namespace avp

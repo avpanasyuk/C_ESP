@@ -11,20 +11,22 @@
 #include <C_General/Error.hpp>
 
 namespace avp {
-  class Log {
+  class HTML_Log {
     static constexpr int DefaultSize = 2000;
     static inline char *Text{nullptr};
     static inline int Sz{0}; // max string length not counting trailing 0
     static inline const char *Br;
     static inline int BrL;
+    static inline bool DoTimeMarks;
 
   public:
-    static void begin(int size = DefaultSize, const char *Break = "<br>") {
+    static void begin(bool DoTimeMarks_ = true, int size = DefaultSize, const char *Break = "<br>") {
       // should set all this stuff before assigning Text value
       Br = Break;
       BrL = strlen(Break);
+      DoTimeMarks = DoTimeMarks_;
       if(Sz != size) Text = (char *)realloc(Text, (Sz = size) + 1); // for trailing zero
-      if(Text == nullptr) debug_puts("Log failed to allocate a buffer!\n");
+      if(Text == nullptr) abort();
       else Text[0] = 0;
     } // begin
 
@@ -70,7 +72,7 @@ namespace avp {
 
     /**
      * @brief function adds s to buffer Text, replacing '\n' with "<br>"
-     *
+     * can be multiline
      * @param s
      * @param AddBreak - adds "<br>" at the end of s.
      */
@@ -89,5 +91,5 @@ namespace avp {
         Add(pos + 1, N - FirstLineN - 1, AddBreak);
       } else AddLine(s, N, AddBreak);
     } // Add
-  }; // class Log
+  }; // class HTML_Log
 } // namespace avp

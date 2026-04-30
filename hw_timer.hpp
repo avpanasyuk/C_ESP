@@ -29,8 +29,7 @@ namespace avp {
    * up to a number MaxNumOfTimers
    * @tparam HWidx: index of hardware timer to use
    */
-  template<uint8_t HWidx = DEFAULT_TIMER, uint16_t Divider = TIMER_BASE_CLK / 10000UL> // hw clock 100 us, we need alarm_value in timerAlarmWrite
-                                                                           // to be higher than 1 with a margin, 10 seems ok
+  template<uint8_t HWidx = DEFAULT_TIMER>
   class HW_Timer_ms {                                                      // counts milliseconds
     static_assert(HWidx < NUM_HW_TIMERS, "Wrong hardware timer index!");
 
@@ -54,7 +53,7 @@ namespace avp {
       void IRAM_ATTR Stop() { CurrentTick = -1; }
     } Timer[MaxNumOfTimers];
 
-    static void  __attribute__((always_inline))  _onHW_Interrupt() {
+    static void  FORCE_INLINE  _onHW_Interrupt() {
       for(uint_fast8_t TimerI = 0; TimerI < NumTimers; ++TimerI) {
         if(Timer[TimerI].CurrentTick < 0) continue;
         if(Timer[TimerI].CurrentTick == 0) {
@@ -70,6 +69,8 @@ namespace avp {
       static bool Begun = false; ///< makes sure I do it once only
       if(!Begun) {
 #ifdef ESP32
+        uint16_t Divider = TIMER_BASE_CLK / 10000UL;  // hw clock 100 us, we need alarm_value in timerAlarmWrite
+                                                      // to be higher than 1 with a margin, 10 seems ok
         hw_timer_t *ptimer = timerBegin(HWidx, Divider, true); //!!!!!!! NEVER EVER SET COUNT DOWN 
         timerAttachInterrupt(ptimer, onHW_Interrupt, true); // attaches interrupt handler, true = edge trigger, does not matter
         timerAlarmWrite(ptimer, 10 /* 1 ms */, true); // set count to trigger the interrupt and autoload
@@ -80,12 +81,11 @@ namespace avp {
         timer1_isr_init();
         timer1_attachInterrupt(onHW_Interrupt);
 
-        // Enable timer with /16 prescaler, edge trigger, continuous mode
-        // At 80MHz / 16 = 5MHz = 0.2us per tick
+        //TIM_DIV256: 312.5Khz (1 tick = 3.2us - 26843542.4 us max)
         timer1_enable(TIM_DIV256, TIM_EDGE, TIM_LOOP);
 
         // Interrupt every 500 ticks * 0.2us = 100us
-        timer1_write(TIMER_BASE_CLK / 256 / 1000 /* to make 1 ms ticks */);
+        timer1_write(313 /* from 312.5 kHz to make 1 ms ticks */);
 
 #endif
         Begun = true;
