@@ -82,7 +82,7 @@ namespace avp {
       WiFi_Around += "</td><td>";
       WiFi_Around += WiFi.RSSI(i);
       WiFi_Around += "</td><td>";
-      WiFi_Around += (WiFi.encryptionType(i) == AUTH_OPEN) ? " " : "*";
+      WiFi_Around += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*";
       WiFi_Around += "</td><td>";
       WiFi_Around += BSSIDtoString(WiFi.BSSID(i));
       WiFi_Around += "</td></tr>";
