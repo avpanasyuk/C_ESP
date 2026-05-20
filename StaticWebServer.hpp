@@ -186,6 +186,7 @@ namespace avp {
       httpUpdater.setup(&s);
 #else
       httpUpdater.setup(&s, "/update");
+      MDNS.addService("http", "tcp", 80);
 #endif
 
       s.begin();

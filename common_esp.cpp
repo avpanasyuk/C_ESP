@@ -38,13 +38,13 @@ namespace avp {
 
   void scanNetworks(bool Async, const char *SSID) {
     auto OldMode = WiFi.getMode(); 
-    if(OldMode != WIFI_MODE_STA && OldMode != WIFI_MODE_APSTA) WiFi.mode(WIFI_AP_STA); 
+    if(OldMode != WIFI_STA && OldMode != WIFI_AP_STA) WiFi.mode(WIFI_AP_STA); 
 #if defined(ESP8266)
     WiFi.scanNetworks(Async, false, 0, (uint8_t *)SSID);
 #else
     WiFi.scanNetworks(Async, false, false, 300U, 0, SSID, nullptr);
 #endif
-    if(OldMode != WIFI_MODE_APSTA) WiFi.mode(OldMode);
+    if(OldMode != WIFI_AP_STA) WiFi.mode(OldMode);
   } // scanNetworks
 
   const char *FindTheBestAPinScan(uint8_t &BestRSSI_i) {
@@ -82,7 +82,7 @@ namespace avp {
       WiFi_Around += "</td><td>";
       WiFi_Around += WiFi.RSSI(i);
       WiFi_Around += "</td><td>";
-      WiFi_Around += (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? " " : "*";
+      WiFi_Around += (WiFi.encryptionType(i) == AUTH_OPEN) ? " " : "*";
       WiFi_Around += "</td><td>";
       WiFi_Around += BSSIDtoString(WiFi.BSSID(i));
       WiFi_Around += "</td></tr>";
