@@ -189,7 +189,7 @@ namespace avp {
 
         // Let's see what we have here
         WiFi.mode(WIFI_STA);
-        WiFi.scanNetworks(false, false, Channel, (uint8_t *)ssid.c_str());
+        scanNetworks(false);
         if(CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str())) {
           WiFi.waitForConnectResult();
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
@@ -240,6 +240,16 @@ namespace avp {
     static void begin(const Options_t &Opts = DefaultOpts()) {
       begin(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_);
     } // begin
+
+    static void scanNetworks(bool IsAsync, const char *ssid_str = ssid.c_str()) {
+#ifdef ESP8266
+      WiFi.scanNetworks(IsAsync, false, Channel, (uint8_t *)ssid_str);
+#endif
+
+#ifdef ESP32
+      WiFi.scanNetworks(IsAsync, false, false, 300U, Channel, ssid_str);
+#endif
+    } // scanNetworks
 
     static void ConfirmConnected() {
       ip = WiFi.localIP();
@@ -334,7 +344,7 @@ namespace avp {
     static void AsyncStartScanNetworks() {
       ConnStatus = Status_t::SCANNING;
       WiFi.mode(WIFI_STA);
-      WiFi.scanNetworks(true, false, Channel, (uint8_t *)ssid.c_str());
+      scanNetworks(true);
     } // AsyncScanNetworks
 
     static void call_in_loop() {
@@ -358,7 +368,9 @@ namespace avp {
         switch(WiFi.status()) {
         case WL_CONNECTED:
           ConfirmConnected();
+#if defined(ESP8266)
           MDNS.notifyAPChange();
+#endif
           break;
         case WL_IDLE_STATUS:
         case WL_DISCONNECTED: // I am still trying to connect
