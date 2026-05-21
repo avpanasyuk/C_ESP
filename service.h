@@ -10,20 +10,14 @@ namespace avp {
   const String &GenerateHTML(const char *html_body, uint16_t AutoRefresh_s = 0, const char *title = nullptr);
 
   /**
-   * @brief Calls WiFi.scanNetworks. To get number of detected APs use WiFi.scanComplete()
+   * @brief It is assumes that we ran either sync or async WiFi.scanNetworks and it is completed with
+   *        some APs found
    *
-   * @param Async
-   * @param SSID if specified looking only for corresponding APs
+   * @param BestRSSI_i: output Best AP index
+   * @param Channel: output, if all APs are on the same channel its value
+   * @retval true if success
    */
-  void scanNetworks(bool Async, const char *SSID = nullptr);
-
-  /**
-   * @brief It is assumes that we ran either sync or async WiFi.scanNetworks and it is completed
-   *
-   * @param OutIndex Best RSSI index
-   * @retval Error message, nullptr is not error
-   */
-  const char *FindTheBestAPinScan(uint8_t &BestRSSI_i);
+  bool FindTheBestAPinScan(uint8_t &BestRSSI_i, int32_t &Channel);
     
     /**
    * @brief to be used with csv_logging_server.py

@@ -57,6 +57,7 @@ namespace avp {
       IDLE,
       TRYING_TO_CONNECT,
       AP_MODE,
+      SCANNING,
       CONNECTED
     } ConnStatus = Status_t::BEFORE_BEGIN; // static so it can be reached from an interrupt
 
@@ -88,6 +89,12 @@ namespace avp {
           avp::TogglePin<LED_Pin>();
         }
         break;
+      case Status_t::SCANNING:
+        if(++Counter > 8) {
+          Counter = 0;
+          avp::TogglePin<LED_Pin>();
+        }
+        break;
       case Status_t::CONNECTED:
         avp::ClearPin<LED_Pin>(); // LED on
         break;
@@ -112,15 +119,17 @@ namespace avp {
 
     static inline bool OTA_IsInProgress;
 
-    static constexpr uint8_t STR_SIZE = 32;         ///< ssid and password string sizes
-    static constexpr int32_t MinRSSIdiffToJump = 8; // dB
+    static constexpr uint8_t STR_SIZE = 32;          ///< ssid and password string sizes
+    static constexpr int32_t MinRSSIdiffToJump = 20; // dB
   protected:
     static inline IPAddress ip;
     static inline const char *Name;
     static inline String ssid, pass;
     static inline status_indication_func_t status_indication_func;
     static inline avp::TimePeriod1<10UL * 1000, millis> ConnectionTO;           // 10 seconds
-    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // 10 seconds
+    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // 10 minutes
+    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> RescanTO;          // time to rescan AP, maybe we can get new connection
+    static inline int32_t Channel = 0;
 
   public:
     /**
@@ -150,6 +159,7 @@ namespace avp {
       },
         200, true);
 
+      WiFi.persistent(false); // should be the first WiFi call
       WiFi.setAutoReconnect(false);
       WiFi.setAutoConnect(false); // do not try to connect to the last known AP, because I want to
                                   // connect to the one with the best RSSI
@@ -176,11 +186,15 @@ namespace avp {
 #ifdef NAME
         WiFi.setHostname(NAME);
 #endif
+
+        // Let's see what we have here
         WiFi.mode(WIFI_STA);
-        scanNetworks(false, ssid.c_str());
-        BeginConnectingToBestAP(ssid.c_str(), pass.c_str());
-        WiFi.waitForConnectResult();
-        CheckConnection();
+        WiFi.scanNetworks(false, false, Channel, (uint8_t *)ssid.c_str());
+        if(CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str())) {
+          WiFi.waitForConnectResult();
+          if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
+          else open_AP(); // if anything went wrong open AP
+        }
       }
       MDNS.begin(Name);
 
@@ -209,6 +223,7 @@ namespace avp {
       });
 
       ArduinoOTA.onError([](ota_error_t error) {
+        WiFi.setSleep(true);
         debug_printf("Error[%u]: ", error);
         if(error == OTA_AUTH_ERROR) debug_puts("Auth Failed");
         else if(error == OTA_BEGIN_ERROR) debug_puts("Begin Failed");
@@ -226,52 +241,46 @@ namespace avp {
       begin(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_);
     } // begin
 
+    static void ConfirmConnected() {
+      ip = WiFi.localIP();
+      debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
+      ConnStatus = Status_t::CONNECTED;
+      RescanTO.Reset();
+    } // ConfirmConnected
+
     /**
-     * @brief Should be called after scanNetworks has run or repeatedly if it was started asynchroneously
+     * @brief Should be called after scanNetworks has successfully completed sync or Async.
+     * Deletes scan at the end
      *
      * @param SSID
      * @param Pass
+     * @retval I have called WiFi.begin() and actually trying to connect
      */
-    static void BeginConnectingToBestAP(const char *SSID, const char *Pass) {
-      uint8_t BestRSSI_i;
-      const char *ErrorMsg(FindTheBestAPinScan(BestRSSI_i));
-      if(ErrorMsg != nullptr) debug_puts(ErrorMsg);
-      else {                                                            // found some APs
-        if(WiFi.status() == WL_CONNECTED) {                             // we will have to compare this scan RSSI with what we have now
-          if(WiFi.RSSI(BestRSSI_i) > WiFi.RSSI() + MinRSSIdiffToJump) { // best RSSI is way better
-            WiFi.disconnect();
+    static bool CheckScanAndTryToConnectToBestAP(const char *SSID, const char *Pass) {
+      if(WiFi.scanComplete() != WIFI_SCAN_RUNNING) {
+        avp::CallWhenOutOfScope _([]() {
+          WiFi.scanDelete();
+        });
+
+        uint8_t BestRSSI_i;
+        if(FindTheBestAPinScan(BestRSSI_i, Channel)) {
+          if(WiFi.status() == WL_CONNECTED && WiFi.RSSI(BestRSSI_i) < WiFi.RSSI() + MinRSSIdiffToJump) {
+            // or current RSSI is fine
+            ConfirmConnected();
+          } else {
             WiFi.mode(WIFI_STA);
-        WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
+            WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
             ConnStatus = Status_t::TRYING_TO_CONNECT;
             ConnectionTO.Reset();
+            return true;
           }
-        } else { // not connected
-          WiFi.mode(WIFI_STA);
-          WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
-          ConnStatus = Status_t::TRYING_TO_CONNECT;
-          ConnectionTO.Reset();
+        } else {
+          if(WiFi.status() != WL_CONNECTED) open_AP();
+          else ConfirmConnected();
         }
-        // WiFi.waitForConnectResult(); // let's not do blocking
       }
-      WiFi.scanDelete();
-    } // BeginConnectingToBestAP
-
-    static void CheckConnection() {
-      switch(WiFi.status()) {
-      case WL_CONNECTED:
-        ip = WiFi.localIP();
-        debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
-        ConnStatus = Status_t::CONNECTED;
-        break;
-      case WL_IDLE_STATUS:
-        break;
-      case WL_DISCONNECTED:
-        if(!ConnectionTO.JustCheck()) break; // Timout is not over yet
-      default:
-        open_AP();
-        break;
-      }
-    } // CheckConnection()
+      return false;
+    } // CheckScanAndTryToConnectToBestAP
 
     static void open_AP() {
       WiFi.mode(WIFI_AP);
@@ -322,29 +331,46 @@ namespace avp {
       } else debug_puts("Failed to open stored credentials file!\n");
     } // StoreAUTH
 
+    static void AsyncStartScanNetworks() {
+      ConnStatus = Status_t::SCANNING;
+      WiFi.mode(WIFI_STA);
+      WiFi.scanNetworks(true, false, Channel, (uint8_t *)ssid.c_str());
+    } // AsyncScanNetworks
+
     static void call_in_loop() {
-      static avp::TimePeriod1<10UL * 60 * 1000, millis> TP;
-      if(WiFi.getMode() == WIFI_MODE_STA) {
-        if(WiFi.scanComplete() != WIFI_SCAN_RUNNING &&
-           !OTA_IsInProgress && TP.Expired()) {
-          // try to find better AP every 10 minutes
-          scanNetworks(true, ssid.c_str());
+      // this function si usual a state machine
+      // OK, let's figure out what we are doing at the moment
+      switch(ConnStatus) {
+      case Status_t::CONNECTED: // I think I am connected
+        if(WiFi.status() != WL_CONNECTED) AsyncStartScanNetworks();
+        else {
+          if(!OTA_IsInProgress && RescanTO.Expired()) AsyncStartScanNetworks();
         }
-
-        if(WiFi.scanComplete() > 0)
-          BeginConnectingToBestAP(ssid.c_str(), pass.c_str());
-      }
-
-      if(ConnStatus == Status_t::AP_MODE) { // WiFi.getMode() in WIFI_AP mode has no clue
+        break;
+      case Status_t::AP_MODE:
         if(WiFi.softAPgetStationNum() > 0) AP_MODE_ACTIVE_TO.Reset();
-        if(AP_MODE_ACTIVE_TO.Expired()) { // nothing is using AP, trying to connect again
-          scanNetworks(false, ssid.c_str());
-          if(WiFi.scanComplete() > 0)
-            BeginConnectingToBestAP(ssid.c_str(), pass.c_str());
+        if(AP_MODE_ACTIVE_TO.Expired()) AsyncStartScanNetworks();
+        break;
+      case Status_t::SCANNING:
+        CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
+        break;
+      case Status_t::TRYING_TO_CONNECT:
+        switch(WiFi.status()) {
+        case WL_CONNECTED:
+          ConfirmConnected();
+          MDNS.notifyAPChange();
+          break;
+        case WL_IDLE_STATUS:
+        case WL_DISCONNECTED: // I am still trying to connect
+          if(ConnectionTO.JustCheck()) open_AP();
+          break;
+        default: // WiFi.begin failed
+          open_AP();
         }
-      }
-
-      if(ConnStatus == Status_t::TRYING_TO_CONNECT) CheckConnection();
+        break;
+      default:
+        break;
+      } // switch(ConnStatus)
 
 #if defined(DO_OTA) && DO_OTA
       ArduinoOTA.handle();

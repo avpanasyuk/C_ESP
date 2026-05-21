@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #ifdef ESP8266
 #include "ESP8266WiFi.h"
+#define WIFI_AUTH_OPEN AUTH_OPEN
 #endif
 #ifdef ESP32
 #include "WiFi.h"
@@ -35,35 +36,33 @@ namespace avp {
 #endif
     return out;
   } // GenerateHTML
-
-  void scanNetworks(bool Async, const char *SSID) {
-    auto OldMode = WiFi.getMode(); 
-    if(OldMode != WIFI_STA && OldMode != WIFI_AP_STA) WiFi.mode(WIFI_AP_STA); 
-#if defined(ESP8266)
-    WiFi.scanNetworks(Async, false, 0, (uint8_t *)SSID);
-#else
-    WiFi.scanNetworks(Async, false, false, 300U, 0, SSID, nullptr);
-#endif
-    if(OldMode != WIFI_AP_STA) WiFi.mode(OldMode);
-  } // scanNetworks
-
-  const char *FindTheBestAPinScan(uint8_t &BestRSSI_i) {
-    if(WiFi.scanComplete() <= 0) return "Nothing in the scan!";
-
+  
+  /**
+  * resets Channel if Scan fails
+  */
+  bool FindTheBestAPinScan(uint8_t &BestRSSI_i, int32_t &Channel) {
+    auto NumAPs = WiFi.scanComplete();
+    if(NumAPs < 1) {
+      Channel = 0; // we can not find old channel, lets check all of them
+      return false;
+    }
     int32_t BestRSSI = INT32_MIN; // initial lowwest possible value
+    Channel = WiFi.channel(0);    // if found channels are different then in future I scan all channels
+                               // 0 indicates that channels are different
 
-    for(int i = 0; i < WiFi.scanComplete(); ++i) {
+    for(int i = 0; i < NumAPs; ++i) {
       uint8_t *BSSID = WiFi.BSSID(i);
       debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n",
         WiFi.SSID(i).c_str(), WiFi.RSSI(i), BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+      if(Channel) Channel = Channel != WiFi.channel(i) ? 0 : WiFi.channel(i);
       if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
     }
-    return nullptr;
+    return true;
   } // FindTheBestAPinScan
 
   String BSSIDtoString(const uint8_t *BSSID) {
-    if (!BSSID) return "00:00:00:00:00:00";
-    return String_printf("%02x:%02x:%02x:%02x:%02x:%02x", 
+    if(!BSSID) return "00:00:00:00:00:00";
+    return String_printf("%02x:%02x:%02x:%02x:%02x:%02x",
       BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
   } // BSSIDtoString
 
