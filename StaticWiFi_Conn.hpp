@@ -64,39 +64,49 @@ namespace avp {
     typedef void (*status_indication_func_t)(); ///< should be declared IRAM_ATTR
                                                 // static void IRAM_ATTR idle() {};
 
+    // LED pin used by Blinken(). Set before passing &Blinken as status_indication_func_.
+    // Runtime parameter (not template) so the IRAM_ATTR actually sticks — GCC doesn't
+    // reliably place template instantiations in the .iram0.text section.
+    static inline uint8_t LED_pin =
 #ifdef LED_BUILTIN
-    template<uint8_t LED_Pin = LED_BUILTIN>
+      LED_BUILTIN;
 #else
-    template<uint8_t LED_Pin>
+      0xFF;
 #endif
-    static void AVP_RAM_ATTR Blinken() { // should be run once in 200 ms or so
+
+    /**
+     * @brief I have tried to make it a template on LEB_BUILTIN, but templates do not implement IRAM_ATTR 
+     * attribute which caused crashes when Blinken was called from ISR
+     * 
+     */
+    static void IRAM_ATTR Blinken() { // should be run once in 200 ms or so
       static int Counter = 0;
 
       switch(ConnStatus) {
       case Status_t::BEFORE_BEGIN:
       case Status_t::IDLE:
-        avp::SetPin<LED_Pin>(); // LED off
+        avp::SetPin(LED_pin); // LED off
         break;
       case Status_t::TRYING_TO_CONNECT:
         if(++Counter > 1) {
           Counter = 0;
-          avp::TogglePin<LED_Pin>();
+          avp::TogglePin(LED_pin);
         }
         break;
       case Status_t::AP_MODE:
         if(++Counter > 4) {
           Counter = 0;
-          avp::TogglePin<LED_Pin>();
+          avp::TogglePin(LED_pin);
         }
         break;
       case Status_t::SCANNING:
         if(++Counter > 8) {
           Counter = 0;
-          avp::TogglePin<LED_Pin>();
+          avp::TogglePin(LED_pin);
         }
         break;
       case Status_t::CONNECTED:
-        avp::ClearPin<LED_Pin>(); // LED on
+        avp::ClearPin(LED_pin); // LED on
         break;
       } // switch (Stat)
     } // Blinken
@@ -210,7 +220,8 @@ namespace avp {
         WiFi.setSleepMode(WIFI_NONE_SLEEP);
 #endif
         delay(100);
-        DEBUG_PUT_PLACE
+        // NB: do NOT read flash string literals (DEBUG_PUT_PLACE, __PRETTY_FUNCTION__, F("..."))
+        // inside OTA callbacks — ArduinoOTA has already precached IROM and other pages may fault.
         OTA_IsInProgress = true;
       });
       ArduinoOTA.onEnd([]() {
