@@ -131,6 +131,9 @@ namespace avp {
     static inline avp::TimePeriod1<10UL * 60 * 1000, millis> RescanTO;          // time to rescan AP, maybe we can get new connection
     static inline int32_t Channel = 0;
 
+    static bool AVP_RAM_ATTR status_tick() { status_indication_func(); return true; }
+    static inline avp::HW_Timer_ms<>::Timer_t *pTimer = nullptr;
+
   public:
     /**
      * @brief there is static class, no contructor. begin() initializes the WiFI connection
@@ -153,11 +156,8 @@ namespace avp {
       status_indication_func = status_indication_func_;
 
       // I have to setup Blinken here to see all connection process
-      avp::HW_Timer_ms<>::CreateTimer([]() {
-        status_indication_func();
-        return true;
-      },
-        200, true);
+      pTimer = &avp::HW_Timer_ms<>::CreateTimer(status_tick, 200, true); // can not use lambda here as 
+      // it does not have IRAM_ATTR
 
       WiFi.persistent(false); // should be the first WiFi call
       WiFi.setAutoReconnect(false);
