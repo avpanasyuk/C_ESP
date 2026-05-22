@@ -124,9 +124,9 @@ namespace avp {
                   "<li> <em>pin?i=n[&set=(0|1)]</em> - set pin value</li>"
                   "<li> <em>pin?i=n[&mode=(0|1)]</em> - set pin mode</li>"
                   "<li> <em>config?ssid=</em>......<em>&pass=</em>......</li>"
-                  "<li> <em>log</em> - outputs debug log</li>"
-                  "<li> <em>update</em> - update firmware</li>"
-                  "<li> <em>reset</em> - reboots MCU</li>");
+                  "<li> <a href='/log'>log</a> - outputs debug log</li>"
+                  "<li> <a href='/update'>update</a> - update firmware</li>"
+                  "<li> <a href='/reset' onclick='return confirm(\"Reboot?\")'>reset</a> - reboots MCU</li>");
         Resp += Options.AddUsage;
         Resp += ShowWiFiAndEntry();
         Resp += "</html>";
