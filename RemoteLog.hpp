@@ -1,11 +1,12 @@
 #pragma once
 /**
  * @file RemoteLog.hpp
- * @brief CSV-framed remote logger; counterpart to csv_logging_server.py.
+ * @brief CSV-framed remote logger; counterpart to http_server.py.
  *
- * Wire format on each POST: "<filename>, <payload>"
- * The server splits on the first comma, prepends a timestamp, and appends
- * the payload as one line to /tmp/logs/<filename>.log.
+ * Wire format on each POST: "<filename>,<csv-data>"
+ * The server strips/splits on every comma, prepends a timestamp column, and
+ * appends the row to <log-dir>/<filename> (filename used verbatim — include
+ * the `.csv` extension if you want one).
  *
  * Single static buffer (one instantiation per program); not thread-safe,
  * call only from the main loop.
@@ -23,7 +24,7 @@
 namespace avp {
   template<size_t MaxLineBytes = 2048>
   class RemoteLog {
-    static constexpr const char *Sep = ", ";
+    static constexpr const char *Sep = ",";
     static inline const char *URL = nullptr;
     static inline char Buf[MaxLineBytes];
 
