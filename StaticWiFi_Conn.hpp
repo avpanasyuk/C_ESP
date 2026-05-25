@@ -263,10 +263,26 @@ namespace avp {
     } // scanNetworks
 
     static void ConfirmConnected() {
-      ip = WiFi.localIP();
+      IPAddress newIP = WiFi.localIP();
+      if((uint32_t)newIP == 0) {
+        // WL_CONNECTED reports only L2 association; DHCP may still be in flight.
+        // Stay in current state so the caller re-enters next loop iteration.
+        // Critical: LEAmDNS::_joinMulticastGroups skips interfaces with no IP,
+        // so calling MDNS.notifyAPChange() before DHCP completes leaves mDNS
+        // silently broken until *another* AP change -- which never comes.
+        return;
+      }
+      ip = newIP;
       debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
       ConnStatus = Status_t::CONNECTED;
       RescanTO.Reset();
+#if defined(ESP8266)
+      // Re-publish mDNS records on every (re)connect that brought a fresh IP.
+      // Fires from ALL ConfirmConnected paths -- not just TRYING_TO_CONNECT --
+      // so e.g. a router reset that the chip recovers from without losing
+      // WL_CONNECTED still refreshes the mDNS UDP socket.
+      MDNS.notifyAPChange();
+#endif
     } // ConfirmConnected
 
     /**
@@ -378,10 +394,7 @@ namespace avp {
       case Status_t::TRYING_TO_CONNECT:
         switch(WiFi.status()) {
         case WL_CONNECTED:
-          ConfirmConnected();
-#if defined(ESP8266)
-          MDNS.notifyAPChange();
-#endif
+          ConfirmConnected(); // also calls MDNS.notifyAPChange() once localIP is valid
           break;
         case WL_IDLE_STATUS:
         case WL_DISCONNECTED: // I am still trying to connect
