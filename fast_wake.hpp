@@ -31,6 +31,7 @@
 #else
 #include <WiFi.h>
 #endif
+#include "C_General/General.h" // ::Crc32
 
 namespace avp {
 
@@ -46,27 +47,17 @@ namespace avp {
   };
   static_assert(sizeof(FastWakeWiFi) % 4 == 0, "RTC writes are dword-aligned");
 
-  inline uint32_t fastwake_crc32(const void *data, size_t len) {
-    const uint8_t *p = (const uint8_t *)data;
-    uint32_t c = 0xFFFFFFFFu;
-    while(len--) {
-      c ^= *p++;
-      for(int i = 0; i < 8; ++i) c = (c >> 1) ^ (0xEDB88320u & -(c & 1u));
-    }
-    return ~c;
-  }
-
   /// Read FastWakeWiFi from RTC user memory at the given dword offset. Returns
   /// true iff the read succeeded and the CRC matches (i.e. the cache is valid).
   inline bool ReadFastWakeWiFi(FastWakeWiFi &out, uint32_t rtc_off_dwords = 0) {
     if(!ESP.rtcUserMemoryRead(rtc_off_dwords, (uint32_t *)&out, sizeof(out))) return false;
-    return out.crc == fastwake_crc32(&out, offsetof(FastWakeWiFi, crc));
+    return out.crc == ::Crc32((const uint8_t *)&out, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
   }
 
   /// Compute the CRC and write to RTC user memory at the given dword offset.
   /// Mutates `in.crc`. Safe to call from any normal context.
   inline void WriteFastWakeWiFi(FastWakeWiFi &in, uint32_t rtc_off_dwords = 0) {
-    in.crc = fastwake_crc32(&in, offsetof(FastWakeWiFi, crc));
+    in.crc = ::Crc32((const uint8_t *)&in, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
     ESP.rtcUserMemoryWrite(rtc_off_dwords, (uint32_t *)&in, sizeof(in));
   }
 
