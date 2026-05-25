@@ -18,7 +18,18 @@ namespace avp {
    * @retval true if success
    */
   bool FindTheBestAPinScan(uint8_t &BestRSSI_i, int32_t &Channel);
-    
+
+  /**
+   * @brief Scan + select-strongest convenience wrapper for projects that don't
+   *        use StaticWiFi_Conn. Blocks for the scan duration (~2 s).
+   *
+   * @param SSID      SSID to filter the scan to
+   * @param BSSID_out 6-byte buffer; filled with the BSSID of the strongest matching AP
+   * @retval true if at least one matching AP was found
+   */
+  bool FindBestAP(const char *SSID, uint8_t *BSSID_out);
+
+
     /**
    * @brief to be used with csv_logging_server.py
    *

@@ -60,6 +60,28 @@ namespace avp {
     return true;
   } // FindTheBestAPinScan
 
+  /// Sync scan filtered to a specific SSID; fills BSSID_out with the strongest match.
+  /// Convenience wrapper around scanNetworks + FindTheBestAPinScan for projects
+  /// that don't use StaticWiFi_Conn. Blocks ~2 s while scanning.
+  bool FindBestAP(const char *SSID, uint8_t *BSSID_out) {
+#if defined(ESP8266)
+    int n = WiFi.scanNetworks(false /*async*/, false /*show_hidden*/, 0 /*channel=any*/, (uint8_t *)SSID);
+#else
+    int n = WiFi.scanNetworks(false, false, false, 300U, 0, SSID, nullptr);
+#endif
+    if(n < 1) { WiFi.scanDelete(); return false; }
+    uint8_t bestIdx = 0;
+    int32_t channel = 0;
+    bool ok = FindTheBestAPinScan(bestIdx, channel);
+    if(ok) {
+      const uint8_t *b = WiFi.BSSID(bestIdx);
+      if(b) memcpy(BSSID_out, b, 6);
+      else ok = false;
+    }
+    WiFi.scanDelete();
+    return ok;
+  } // FindBestAP
+
   String BSSIDtoString(const uint8_t *BSSID) {
     if(!BSSID) return "00:00:00:00:00:00";
     return String_printf("%02x:%02x:%02x:%02x:%02x:%02x",
