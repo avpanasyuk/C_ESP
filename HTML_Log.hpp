@@ -13,11 +13,17 @@
 namespace avp {
   class HTML_Log {
     static constexpr int DefaultSize = 2000;
+    static constexpr int LastMsgBufSize = 256; // dedup buffer; longer messages skip dedup
     static inline char *Text{nullptr};
     static inline int Sz{0}; // max string length not counting trailing 0
     static inline const char *Br;
     static inline int BrL;
     static inline bool DoTimeMarks;
+    // Dedup state: identical AddLine inputs in a row collapse to a single
+    // entry followed by "#" markers, e.g. "Resolving bsd ...####<br>"
+    // instead of the same message repeated N times.
+    static inline char LastMsg[LastMsgBufSize];
+    static inline int LastMsgLen{0};
 
   public:
     static void begin(bool DoTimeMarks_ = true, int size = DefaultSize, const char *Break = "<br>") {
@@ -48,6 +54,33 @@ namespace avp {
      */
     static void AddLine(const char *s, const int N, bool AddBreak = false) {
       if(Text == nullptr) begin();
+
+      // Dedup: same content as last AddLine input -> append "#" to existing
+      // tail instead of writing the full message again. Buffer ends up like
+      // "msg<br>" -> "msg#<br>" -> "msg##<br>" -> ...
+      if(LastMsgLen > 0 && N == LastMsgLen && memcmp(s, LastMsg, N) == 0) {
+        int len = (int)strlen(Text);
+        // Strip a trailing <br> if the buffer ends with one, so "#" appears
+        // inline with the previous message rather than on a new line.
+        if(len >= BrL && strncmp(Text + len - BrL, Br, BrL) == 0) {
+          len -= BrL;
+          Text[len] = 0;
+        }
+        if(len + 1 + (AddBreak ? BrL : 0) > Sz) return; // no room; skip dedup mark
+        Text[len++] = '#';
+        Text[len] = 0;
+        if(AddBreak) strcpy(Text + len, Br);
+        return;
+      }
+
+      // Different message -- remember it for the next dedup compare.
+      if(N > 0 && N <= LastMsgBufSize) {
+        memcpy(LastMsg, s, N);
+        LastMsgLen = N;
+      } else {
+        LastMsgLen = 0;
+      }
+
       const int Length{(int)strlen(Text)};
       const int SpaceForBreak{AddBreak ? BrL : 0};
 
