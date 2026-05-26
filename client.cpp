@@ -18,35 +18,27 @@ namespace avp {
    * the failure (URL, WiFi state, HTTPClient errno+text, free heap) so that
    * callers logging to a remote/HTML log buffer get something actionable.
    *
-   * NOTE: the underlying HTTPClient is `static` with setReuse(true) so the TCP
-   * connection is held open across calls. WiFiClient is also held in a static
-   * here (was previously stack-allocated, which broke setReuse: the underlying
-   * socket died when the stack WiFiClient destructed, so every call after the
-   * first got HTTPC_ERROR_CONNECTION_FAILED [-1]).
+   * Each call opens a fresh TCP connection (setReuse defaults to false). An
+   * earlier version called setReuse(true) "to save reconnection cost", but
+   * Python http.server (the typical bsd-side receiver) closes the connection
+   * after the response, so every call after the first returned
+   * HTTPC_ERROR_CONNECTION_FAILED (-1) -- HTTPClient kept trying to use the
+   * dead socket. Fresh-connect-each-call is reliable for these low-rate POSTs.
    */
   const char *HTTP_POST_puts(const char *URL, const char *s, size_t sz) {
-    static HTTPClient http;
-#ifdef ESP8266
-    static WiFiClient client; // must outlive setReuse'd http
-#endif
-    static const char *OldURL{nullptr};
-
-    if(URL != OldURL) { // running once
-      if(OldURL != nullptr) return "Cannot change URL in HTTP_POST_puts!\n";
-      http.setReuse(true);
-      OldURL = URL;
-    }
-
     if(WiFi.status() != WL_CONNECTED) {
       return sprintf_static("POST %s: WiFi not connected (status=%d)", URL, (int)WiFi.status());
     }
 
+    HTTPClient http;
 #ifdef ESP32
-    http.begin(URL);
+    if(!http.begin(URL)) {
+      return sprintf_static("POST %s: http.begin() failed", URL);
+    }
     http.addHeader("Content-Type", "text/plain");
 #endif
-
 #ifdef ESP8266
+    WiFiClient client;
     if(!http.begin(client, URL)) {
       return sprintf_static("POST %s: http.begin() failed (URL parse/connection setup)", URL);
     }
@@ -58,14 +50,11 @@ namespace avp {
 
     if(httpCode == 200) return nullptr;
 
-    // Non-200: build a maximally-informative error. HTTPClient::errorToString
-    // turns negative codes (HTTPC_ERROR_CONNECTION_FAILED = -1, etc.) into
-    // human-readable strings; positive codes are HTTP status (404, 500...).
-    const char *codeText = (httpCode < 0)
-                             ? HTTPClient::errorToString(httpCode).c_str()
-                             : "(HTTP status; see code)";
+    // Non-200: build an informative error. errorToString returns a String;
+    // store it in a named local so its buffer outlives sprintf_static's read.
+    String errText = (httpCode < 0) ? HTTPClient::errorToString(httpCode) : String("HTTP status");
     return sprintf_static("POST %s: code=%d (%s), free heap=%lu",
-                          URL, httpCode, codeText, (unsigned long)ESP.getFreeHeap());
+                          URL, httpCode, errText.c_str(), (unsigned long)ESP.getFreeHeap());
   } // HTTP_POST_puts
 
   const char *HTTP_POST_puts(const char *URL, const char *s) {
