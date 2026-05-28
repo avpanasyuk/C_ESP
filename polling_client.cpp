@@ -11,7 +11,9 @@ namespace avp {
 
     GetIP();
     if(Error != nullptr) return Error;
-    if(!Client.connect(remote_addr, port)) return Error = "Failed to connect to server!";
+    // Connect by hostname (not the resolved IP) so WiFiClientSecure sends SNI,
+    // which CDN-fronted hosts like api.weather.gov require for the handshake.
+    if(!Client.connect(server, port)) return Error = "Failed to connect to server!";
     Client.printf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: ff\r\nConnection: close\r\n\r\n", Message, server);
 
     // we are waiting until either response reaches or server closes connection

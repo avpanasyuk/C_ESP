@@ -30,7 +30,8 @@ namespace avp {
     explicit Client_(WiFiClient &Client_, const char *server_, uint16_t port_, unsigned long Timeout_ms_)
         : Client(Client_), server(server_), port(port_), Timeout_ms(Timeout_ms_), call_back(nullptr), Error(nullptr) {
       Client.setTimeout(Timeout_ms);
-      GetIP();
+      // Do NOT resolve here: globals are constructed before WiFi is up, which
+      // would cache a "Can not resolve name" error. Resolve in SendGET instead.
     } // constructor
 
     /**
