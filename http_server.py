@@ -1,146 +1,276 @@
 #!/usr/bin/env python3
 """
-Simple HTTP server to receive POST data from ESP32
-Parses comma-separated data: filename,data1,data2,...
-Writes to CSV file with timestamp as first column
+HTTP server for the ESP fleet.
+
+POST  /<anypath>  body: filename-or-email,csv,data,...
+                  If filename-or-email contains '@' it's treated as an email
+                  recipient: the SECOND CSV field is the subject and the rest
+                  is the body. Otherwise (default) the row is appended to
+                  <log-dir>/<filename> with a Unix-epoch timestamp prepended
+                  (matches the legacy readout_*.py CSV format so MATLAB
+                  analysis of pre-existing files keeps working).
+
+GET   /firmware/<name>.bin                       -> serves <firmware-dir>/<name>.bin. Returns
+                                                    304 (device skips re-flashing) when the
+                                                    device's x-ESP8266-sketch-md5 matches
+                                                    md5(<name>.bin). Used by ESPhttpUpdate for
+                                                    cheap polling.
+
+ESPhttpUpdate sends x-ESP8266-sketch-md5 (the running sketch's MD5) on every poll, and
+md5(<name>.bin) equals that for a matching image -- so it's the reliable "already running
+this?" test. The library does NOT send If-Modified-Since, so the mtime check is only a
+fallback. The x-ESP8266-version string is logged for visibility.
+
+Email mode requires a working `mail(1)` binary in PATH and a local MTA
+(sendmail/postfix) that can relay or deliver. Tested on FreeBSD bsd.
 """
 
 import argparse
+import email.utils
+import hashlib
+import os
+import re
+import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
 from pathlib import Path
 
 
-class ESP32DataHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for ESP32 data"""
-    
-    # Class variable to store log file path
+EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
+
+
+def looks_like_email(s):
+    """True if `s` looks like an email address (no whitespace/commas, has @ and a dot in the domain)."""
+    return bool(EMAIL_RE.match(s))
+
+
+def send_mail(recipient, subject, body, mail_bin="mail"):
+    """Pipe `body` to `<mail_bin> -s <subject> <recipient>`. Raises CalledProcessError on failure."""
+    # Sanitize subject: collapse any newlines (header-injection guard) and cap length.
+    subject = subject.replace("\n", " ").replace("\r", " ")[:200]
+    subprocess.run(
+        [mail_bin, "-s", subject, recipient],
+        input=body.encode("utf-8"),
+        check=True,
+        timeout=30,
+    )
+
+
+class ESPDataHandler(BaseHTTPRequestHandler):
     log_dir = None
-    
+    firmware_dir = None
+    mail_bin = "mail"
+
+    # -- POST: data logging or email ---------------------------------------------------
+
     def do_POST(self):
-        """Handle POST requests"""
         try:
-            # Get content length
             content_length = int(self.headers.get('Content-Length', 0))
-            
-            # Read the request body
             body = self.rfile.read(content_length)
             data = body.decode('utf-8').strip()
-            
-            # Create timestamp
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-            
-            # Parse comma-separated data
+
+            # Two timestamps: file mode uses Unix epoch (matches the legacy
+            # readout_*.py CSV output so MATLAB analysis keeps working);
+            # email mode uses human-readable (epoch in a notification is
+            # unfriendly); console log lines also use human-readable.
+            # Truncate epoch to 2 decimals (10 ms) -- 60-Hz sampling has no
+            # need for the ~16-digit precision Python's default str() produces.
+            ts_epoch = f"{time.time():.2f}"
+            ts_human = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             parts = [p.strip() for p in data.split(',')]
-            
-            if len(parts) < 1:
-                print(f"\n[{timestamp}] Error: Empty data received")
-                self.send_response(400)
-                self.send_header('Content-Type', 'text/plain')
-                self.end_headers()
-                self.wfile.write(b'Error: Empty data')
+
+            if not parts:
+                print(f"\n[{ts_human}] Error: empty data")
+                self._send(400, b'Error: Empty data')
                 return
-            
-            # First element is filename
-            filename = Path(self.log_dir) / parts[0]
-            # Remaining elements are data
+
+            first = parts[0]
             csv_data = parts[1:]
-            
-            # Display to console
-            print(f"\n[{timestamp}] Received data:")
+
+            # Email dispatch path: parts[0] is an email address.
+            if looks_like_email(first):
+                if not csv_data or not csv_data[0]:
+                    print(f"\n[{ts_human}] Email to {first}: missing subject (2nd CSV field)")
+                    self._send(400, b'Email needs subject as second CSV field')
+                    return
+                subject = csv_data[0]
+                body_data = csv_data[1:]
+                mail_body = f"{ts_human}\n" + (",".join(body_data) if body_data else "")
+                print(f"\n[{ts_human}] Email -> {first}")
+                print(f"  Subject: {subject!r}")
+                print(f"  Body: {mail_body!r}")
+                try:
+                    send_mail(first, subject, mail_body, mail_bin=self.mail_bin)
+                    print(f"  Sent")
+                    self._send(200, b'OK')
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+                    print(f"  Email send failed: {e}")
+                    self._send(500, b'Email send failed')
+                return
+
+            # Default path: append to file. The filename comes from the POST
+            # body, so confine it to log_dir (reject path traversal).
+            filename = first
+            csv_path = (Path(self.log_dir) / filename).resolve()
+            try:
+                csv_path.relative_to(Path(self.log_dir).resolve())
+            except ValueError:
+                print(f"\n[{ts_human}] Rejected out-of-dir filename: {filename!r}")
+                self._send(400, b'Bad filename')
+                return
+            print(f"\n[{ts_human}] Received data:")
             print(f"  File: {filename}")
             print(f"  Data: {', '.join(csv_data)}")
             print(f"  Size: {len(data)} bytes")
-            
-            # Write to CSV file
+
             try:
-                csv_path = Path(filename)
-                # Create parent directory if needed
                 csv_path.parent.mkdir(parents=True, exist_ok=True)
-                
                 with open(csv_path, 'a') as f:
-                    # Write timestamp as first column, then data
-                    row = [timestamp] + csv_data
-                    f.write(','.join(row) + '\n')
-                
-                print(f"  ✓ Written to: {csv_path.absolute()}")
+                    f.write(','.join([ts_epoch] + csv_data) + '\n')
+                print(f"  Written to: {csv_path.absolute()}")
             except IOError as e:
-                print(f"  ✗ Error writing to CSV: {e}")
-            
-            # Send HTTP 200 response
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/plain')
-            self.send_header('Content-Length', '2')
-            self.end_headers()
-            self.wfile.write(b'OK')
-            
+                print(f"  Error writing CSV: {e}")
+
+            self._send(200, b'OK')
+
         except Exception as e:
-            print(f"Error processing request: {e}")
-            self.send_response(500)
-            self.send_header('Content-Type', 'text/plain')
+            print(f"Error processing POST: {e}")
+            self._send(500, b'Error')
+
+    # -- GET: firmware serving for ESPhttpUpdate ---------------------------------------
+
+    def do_GET(self):
+        if self.firmware_dir is None or not self.path.startswith('/firmware/'):
+            self._send(404, b'Not Found')
+            return
+
+        # Sanitize: strip /firmware/ prefix, reject path-traversal attempts
+        rel = self.path[len('/firmware/'):]
+        if '..' in rel.split('/') or rel.startswith('/'):
+            self._send(400, b'Bad Request')
+            return
+
+        path = (Path(self.firmware_dir) / rel).resolve()
+        firmware_root = Path(self.firmware_dir).resolve()
+        try:
+            path.relative_to(firmware_root)
+        except ValueError:
+            self._send(400, b'Bad Request')
+            return
+
+        if not path.is_file():
+            print(f"[firmware] GET {self.path} -> 404 (not on disk)")
+            self._send(404, b'Not Found')
+            return
+
+        file_mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        # truncate to whole seconds (HTTP date precision)
+        file_mtime = file_mtime.replace(microsecond=0)
+
+        device_version = self.headers.get('x-ESP8266-version', '?')
+
+        # Primary dedup: ESPhttpUpdate sends the running sketch's MD5 on every
+        # poll, and md5(<name>.bin) equals that for a matching image -- an equal
+        # MD5 means the device already runs this firmware. (The library does NOT
+        # send If-Modified-Since, so the date check below is only a fallback.)
+        device_md5 = self.headers.get('x-ESP8266-sketch-md5')
+        if device_md5 and device_md5 == hashlib.md5(path.read_bytes()).hexdigest():
+            print(f"[firmware] GET {self.path} (device fw={device_version}) -> 304 (md5 match)")
+            self.send_response(304)
+            self.send_header('Last-Modified', email.utils.format_datetime(file_mtime, usegmt=True))
             self.end_headers()
-            self.wfile.write(b'Error')
-    
+            return
+
+        ims_header = self.headers.get('If-Modified-Since')
+        if ims_header:
+            try:
+                ims = email.utils.parsedate_to_datetime(ims_header)
+                if ims.tzinfo is None:
+                    ims = ims.replace(tzinfo=timezone.utc)
+                if ims >= file_mtime:
+                    print(f"[firmware] GET {self.path} (device fw={device_version}) -> 304 Not Modified")
+                    self.send_response(304)
+                    self.send_header('Last-Modified', email.utils.format_datetime(file_mtime, usegmt=True))
+                    self.end_headers()
+                    return
+            except (TypeError, ValueError) as e:
+                print(f"[firmware] Bad If-Modified-Since '{ims_header}': {e}")
+
+        size = path.stat().st_size
+        print(f"[firmware] GET {self.path} (device fw={device_version}) -> 200 OK, {size} bytes")
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/octet-stream')
+        self.send_header('Content-Length', str(size))
+        self.send_header('Last-Modified', email.utils.format_datetime(file_mtime, usegmt=True))
+        self.end_headers()
+        with open(path, 'rb') as f:
+            while True:
+                chunk = f.read(8192)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+
+    # -- shared helpers ----------------------------------------------------------------
+
+    def _send(self, code, body):
+        self.send_response(code)
+        self.send_header('Content-Type', 'text/plain')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, format, *args):
-        """Override to customize logging"""
-        # Suppress default HTTP logging; we handle it ourselves
-        pass
+        pass  # we do our own logging
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='HTTP server to receive and log ESP32 POST data to CSV',
+        description='HTTP server: receive POST data from ESP fleet, serve firmware to ESPhttpUpdate',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
-Data format: filename,data1,data2,data3,...
-  - First element: CSV filename (created if doesn't exist)
-  - Remaining elements: CSV data columns
-  - Timestamp added as first column automatically
+POST  body format (file mode): filename,col1,col2,...
+  Writes <timestamp>,col1,col2,... to <log-dir>/<filename>
 
-Examples:
-  python http_server.py -p 8080
-  python http_server.py -p 8080 -D /tmp
-  python http_server.py -H 0.0.0.0 -p 5000 -D /tmp
+POST  body format (email mode): address@host.dom,subject,body...
+  Sends an email to the address. Subject is the second CSV field;
+  body is timestamp + remaining fields (joined by comma).
+  Requires `mail(1)` and a working local MTA.
 
-ESP32 example:
-  HTTP_POST_puts("http://192.168.1.100:8080", "sensor_data.csv,25.5,60.2,1013.25");
-        '''
+GET   /firmware/<name>.bin
+  Serves <firmware-dir>/<name>.bin; 304 when the device's x-ESP8266-sketch-md5 already
+  matches md5(<name>.bin). Drop a fresh .bin and the next polling device picks it up.
+''',
     )
-    
-    parser.add_argument(
-        '-p', '--port',
-        type=int,
-        default=8000,
-        help='Port to listen on (default: 8000)'
-    )
-    parser.add_argument(
-        '-H', '--host',
-        default='0.0.0.0',
-        help='Host to bind to (default: localhost, use 0.0.0.0 for all interfaces)'
-    )
-    parser.add_argument(
-        '-D', '--dir',
-        default='/mnt/T',
-        help='Directory to create log file in'
-    )
-    
+    parser.add_argument('-p', '--port', type=int, default=8000)
+    parser.add_argument('-H', '--host', default='0.0.0.0')
+    parser.add_argument('-D', '--dir', default='/mnt/T',
+                        help='Directory where logged CSVs land (default: /mnt/T)')
+    parser.add_argument('-F', '--firmware-dir', default=None,
+                        help='Directory where firmware .bin files live; omit to disable GET /firmware/')
+    parser.add_argument('--mail-bin', default='mail',
+                        help='Path to mail(1) binary used for email-mode POSTs (default: mail)')
     args = parser.parse_args()
-    
-    ESP32DataHandler.log_dir = args.dir;
-    
-    # Create and start server
-    server_address = (args.host, args.port)
-    httpd = HTTPServer(server_address, ESP32DataHandler)
-    
-    print(f"HTTP Server listening on http://{args.host}:{args.port}")
+
+    ESPDataHandler.log_dir = args.dir
+    ESPDataHandler.firmware_dir = args.firmware_dir
+    ESPDataHandler.mail_bin = args.mail_bin
+
+    if args.firmware_dir and not os.path.isdir(args.firmware_dir):
+        print(f"Warning: firmware-dir '{args.firmware_dir}' does not exist", file=sys.stderr)
+
+    server = HTTPServer((args.host, args.port), ESPDataHandler)
+    print(f"HTTP server listening on http://{args.host}:{args.port}")
+    print(f"  log dir:      {args.dir}")
+    print(f"  firmware dir: {args.firmware_dir or '(disabled)'}")
+    print(f"  mail binary:  {args.mail_bin}")
     print("Press Ctrl+C to stop\n")
-    
     try:
-        httpd.serve_forever()
+        server.serve_forever()
     except KeyboardInterrupt:
-        print("\n\nServer stopped")
-        httpd.server_close()
+        print("\nServer stopped")
+        server.server_close()
 
 
 if __name__ == '__main__':
