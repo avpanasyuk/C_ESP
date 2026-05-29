@@ -272,8 +272,12 @@ namespace avp {
         // silently broken until *another* AP change -- which never comes.
         return;
       }
+      // Log every IP change (release + debug); same-IP roams stay silent so
+      // /log shows only meaningful network events.
+      bool ip_changed = (ip != newIP);
       ip = newIP;
-      debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
+      if(ip_changed)
+        debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
       ConnStatus = Status_t::CONNECTED;
       RescanTO.Reset();
 #if defined(ESP8266)

@@ -51,9 +51,11 @@ namespace avp {
                                // 0 indicates that channels are different
 
     for(int i = 0; i < NumAPs; ++i) {
+#ifndef NDEBUG
       uint8_t *BSSID = WiFi.BSSID(i);
       debug_printf("Found %s, RSSI:%d, BSSID: %02x:%02x:%02x:%02x:%02x:%02x\n",
         WiFi.SSID(i).c_str(), WiFi.RSSI(i), BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
+#endif
       if(Channel) Channel = Channel != WiFi.channel(i) ? 0 : WiFi.channel(i);
       if(WiFi.RSSI(i) > BestRSSI) BestRSSI = WiFi.RSSI(BestRSSI_i = i);
     }
