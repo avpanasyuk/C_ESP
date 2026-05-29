@@ -45,6 +45,10 @@ namespace avp {
     http.addHeader("Content-Type", "text/plain");
 #endif
 
+    // Fail fast: this POST is synchronous, so a stalled connection blocks the
+    // caller's main loop (and anything it does between posts, e.g. sampling).
+    // 1 s is ample on a healthy LAN; the HTTPClient default is 5 s.
+    http.setTimeout(1000);
     int httpCode = http.POST((uint8_t *)s, sz);
     http.end();
 
