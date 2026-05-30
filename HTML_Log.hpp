@@ -26,6 +26,12 @@ namespace avp {
     static inline int LastMsgLen{0};
 
   public:
+    // Optional timestamp prefix callback (set by project). Returns a static
+    // C string prepended to each new entry when DoTimeMarks is true. Dedup
+    // compares the message bytes only, so identical messages still collapse to
+    // a single timestamped entry plus "#" markers.
+    static inline const char *(*GetTimestamp)() = nullptr;
+
     static void begin(bool DoTimeMarks_ = true, int size = DefaultSize, const char *Break = "<br>") {
       // should set all this stuff before assigning Text value
       Br = Break;
@@ -55,13 +61,12 @@ namespace avp {
     static void AddLine(const char *s, const int N, bool AddBreak = false) {
       if(Text == nullptr) begin();
 
-      // Dedup: same content as last AddLine input -> append "#" to existing
-      // tail instead of writing the full message again. Buffer ends up like
-      // "msg<br>" -> "msg#<br>" -> "msg##<br>" -> ...
+      // Dedup: same message bytes as the previous AddLine input -> append "#"
+      // to existing tail instead of writing the full message again. Compares
+      // only the message (not any timestamp prefix), so repeated entries still
+      // collapse to "<ts> msg#" -> "<ts> msg##" -> ...
       if(LastMsgLen > 0 && N == LastMsgLen && memcmp(s, LastMsg, N) == 0) {
         int len = (int)strlen(Text);
-        // Strip a trailing <br> if the buffer ends with one, so "#" appears
-        // inline with the previous message rather than on a new line.
         if(len >= BrL && strncmp(Text + len - BrL, Br, BrL) == 0) {
           len -= BrL;
           Text[len] = 0;
@@ -81,25 +86,30 @@ namespace avp {
         LastMsgLen = 0;
       }
 
+      // Optional timestamp prefix; project supplies the format via GetTimestamp.
+      const char *ts = (DoTimeMarks && GetTimestamp) ? GetTimestamp() : "";
+      const int TsL = (int)strlen(ts);
       const int Length{(int)strlen(Text)};
       const int SpaceForBreak{AddBreak ? BrL : 0};
+      const int EntryLen = TsL + N + SpaceForBreak;
 
-      if(N + SpaceForBreak > Sz) AddLine("New entry is too big!", true);
+      if(EntryLen > Sz) AddLine("New entry is too big!", true);
       else {
-        int Shift = Length + N + SpaceForBreak - Sz; // new string does not fit, how much I have to shift log up
+        int Shift = Length + EntryLen - Sz; // shift log up if buffer would overflow
         char *p = Text;
 
-        if(Shift > 0) {                               // overran, got to shift at least by Shift
+        if(Shift > 0) {
           const char *pBr = strstr(Text + Shift, Br); // find next break after Shift
-
           if(pBr != nullptr) {
-            pBr += BrL;                             // step over the last break, we do not need to copy it
+            pBr += BrL;                             // skip past it
             for(; *pBr != 0; ++p, ++pBr) *p = *pBr; // shift buffer
           }
-        } else p += Length; // no shift, just step over the end of the string
-        strncpy(p, s, N);
-        if(AddBreak) strcpy(p + N, Br);
-        else p[N] = 0; // strncpy does not always put trailing 0
+        } else p += Length; // no shift -- write at end
+
+        if(TsL > 0) { memcpy(p, ts, TsL); p += TsL; }
+        if(N > 0) { strncpy(p, s, N); p += N; }
+        if(AddBreak) strcpy(p, Br);
+        else *p = 0;
       }
     } // AddLine
 
@@ -114,14 +124,18 @@ namespace avp {
     } // Add
 
     static void Add(const char *s, const int N, bool AddBreak = false) {
-      if(Text == nullptr) begin(); // it should not happen
+      if(Text == nullptr) begin();
 
-      // replace newlines with breaks, using recursion
+      // Split on newlines: each becomes its own <br>-terminated line. If the
+      // remainder after a newline is empty, don't recurse -- the previous
+      // AddLine already wrote a trailing break; recursing would add a second
+      // one and render as a visible blank line.
       char *pos = (char *)memchr(s, '\n', N);
-      if(pos != nullptr) { // found newline, sending first line and recurse the rest
+      if(pos != nullptr) {
         const int FirstLineN = pos - s;
+        const int RemainderN = N - FirstLineN - 1;
         AddLine(s, FirstLineN, true);
-        Add(pos + 1, N - FirstLineN - 1, AddBreak);
+        if(RemainderN > 0) Add(pos + 1, RemainderN, AddBreak);
       } else AddLine(s, N, AddBreak);
     } // Add
   }; // class HTML_Log
