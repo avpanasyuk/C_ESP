@@ -324,13 +324,19 @@ namespace avp {
     } // CheckScanAndTryToConnectToBestAP
 
     static void open_AP() {
+      // Capture the STA status we're abandoning *before* switching the radio to AP
+      // mode, so /log records WHY every fallback happened (not just that it did).
+      // ESP8266 wl_status_t: 0=IDLE 1=NO_SSID_AVAIL 2=SCAN_DONE 3=CONNECTED
+      //                      4=CONNECT_FAILED 5=CONNECTION_LOST 6=WRONG_PASSWORD 7=DISCONNECTED.
+      int sta_status = WiFi.status();
       WiFi.mode(WIFI_AP);
       WiFi.softAP(Name, "");
       ip = WiFi.softAPIP();
       AP_MODE_ACTIVE_TO.Reset();
       ConnStatus = Status_t::AP_MODE;
-      debug_printf("Waiting for connection in AP mode, IP:%s!\n",
-        (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str());
+      debug_printf("Waiting for connection in AP mode, IP:%s! (left STA status=%d)\n",
+        (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str(),
+        sta_status);
     } // open_AP
 
     static String getIP() { return ip.toString(); }
