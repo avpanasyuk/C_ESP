@@ -62,6 +62,7 @@ class ESPDataHandler(BaseHTTPRequestHandler):
     log_dir = None
     firmware_dir = None
     mail_bin = "mail"
+    max_log_bytes = 10 * 1024 * 1024   # rotate a log file to .1 once it grows past this
 
     # -- POST: data logging or email ---------------------------------------------------
 
@@ -129,6 +130,12 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                 csv_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(csv_path, 'a') as f:
                     f.write(','.join([ts_epoch] + csv_data) + '\n')
+                # Cap file size so a chatty/looping device can't fill the disk:
+                # past the limit, rotate to <file>.1 (replacing any old .1) and
+                # let a fresh file start. Bounds each log to ~2x max_log_bytes.
+                if csv_path.stat().st_size > self.max_log_bytes:
+                    csv_path.replace(Path(str(csv_path) + '.1'))
+                    print(f"  Rotated {filename} (> {self.max_log_bytes} bytes)")
                 print(f"  Written to: {csv_path.absolute()}")
             except IOError as e:
                 print(f"  Error writing CSV: {e}")
@@ -251,11 +258,14 @@ GET   /firmware/<name>.bin
                         help='Directory where firmware .bin files live; omit to disable GET /firmware/')
     parser.add_argument('--mail-bin', default='mail',
                         help='Path to mail(1) binary used for email-mode POSTs (default: mail)')
+    parser.add_argument('--max-log-bytes', type=int, default=10 * 1024 * 1024,
+                        help='Rotate a log file to <file>.1 once it exceeds this size (default: 10 MiB)')
     args = parser.parse_args()
 
     ESPDataHandler.log_dir = args.dir
     ESPDataHandler.firmware_dir = args.firmware_dir
     ESPDataHandler.mail_bin = args.mail_bin
+    ESPDataHandler.max_log_bytes = args.max_log_bytes
 
     if args.firmware_dir and not os.path.isdir(args.firmware_dir):
         print(f"Warning: firmware-dir '{args.firmware_dir}' does not exist", file=sys.stderr)
@@ -265,6 +275,7 @@ GET   /firmware/<name>.bin
     print(f"  log dir:      {args.dir}")
     print(f"  firmware dir: {args.firmware_dir or '(disabled)'}")
     print(f"  mail binary:  {args.mail_bin}")
+    print(f"  max log size: {args.max_log_bytes} bytes (rotate to .1)")
     print("Press Ctrl+C to stop\n")
     try:
         server.serve_forever()
