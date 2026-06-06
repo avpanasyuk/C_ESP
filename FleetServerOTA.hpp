@@ -58,8 +58,9 @@ namespace avp {
 #error "avp::PullUpdateFromFleetServer requires ESP8266 or ESP32"
 #endif
 
+    // Quiet on the common no-update case (this may be polled often); only
+    // failures are logged, and the result is returned for the caller to act on.
     if(r == HTTP_UPDATE_FAILED) debug_printf("FleetServer OTA failed: %s\n", err.c_str());
-    else if(r == HTTP_UPDATE_NO_UPDATES) debug_puts("FleetServer OTA: no new firmware\n");
     return r;
   } // PullUpdateFromFleetServer
 } // namespace avp
