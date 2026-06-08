@@ -128,6 +128,8 @@ namespace avp {
     } // Default
 
     static inline bool OTA_IsInProgress;
+    static inline uint32_t OTA_LastActivity_ms;            ///< millis() of last OTA start/progress, for the stall watchdog
+    static constexpr uint32_t OTA_StallTimeout_ms = 30000; ///< no OTA progress for this long => assume the upload died
 
     static constexpr uint8_t STR_SIZE = 32;          ///< ssid and password string sizes
     static constexpr int32_t MinRSSIdiffToJump = 20; // dB
@@ -222,6 +224,7 @@ namespace avp {
         delay(100);
         // NB: do NOT read flash string literals (DEBUG_PUT_PLACE, __PRETTY_FUNCTION__, F("..."))
         // inside OTA callbacks — ArduinoOTA has already precached IROM and other pages may fault.
+        OTA_LastActivity_ms = millis();
         OTA_IsInProgress = true;
       });
       ArduinoOTA.onEnd([]() {
@@ -230,6 +233,7 @@ namespace avp {
         OTA_IsInProgress = false;
       });
       ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        OTA_LastActivity_ms = millis();
         debug_printf("Progress: %u%%\r", (progress / (total / 100)));
       });
 
@@ -420,6 +424,15 @@ namespace avp {
 
 #if defined(DO_OTA) && DO_OTA
       ArduinoOTA.handle();
+      // Stall watchdog: ArduinoOTA does not reliably fire onError when an upload
+      // dies mid-transfer (uploading host vanished, TCP wedged), so OTA_IsInProgress
+      // can get stuck true -- which silently freezes any sketch that gates its work
+      // on it (no sampling, no logging, web server still alive). If no OTA progress
+      // for OTA_StallTimeout_ms, assume the upload is dead and reboot to recover.
+      if(OTA_IsInProgress && (millis() - OTA_LastActivity_ms > OTA_StallTimeout_ms)) {
+        debug_puts("OTA stalled -- rebooting to recover");
+        ESP.restart();
+      }
 #endif
 #if defined(ESP8266)
       MDNS.update();
