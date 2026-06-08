@@ -29,8 +29,10 @@
 namespace avp {
   /**
    * @brief Pull "<name>.bin" from http://<server>:<port>/firmware/ and flash it
-   *        if the server's image differs from the one running. Reboots on a
-   *        successful update (does not return); otherwise returns the result.
+   *        if the server's image differs from the one running. On success logs
+   *        FW_UPDATE,was=<version> (via debug_printf, so it reaches whatever sink
+   *        the project wired -- e.g. the fleet Debug_log) and reboots into the new
+   *        image (does not return); otherwise returns the result.
    *
    * @param name    firmware base name -- the file pulled is "<name>.bin"
    *                (usually the NAME macro / device netname).
@@ -46,18 +48,31 @@ namespace avp {
     WiFiClient client;
     String url = String("http://") + server + ":" + port + "/firmware/" + name + ".bin";
 
-    // Only the update() call + error string are platform-specific; keep the
-    // result handling below common so no if/else straddles the #if branches.
+    // Take over the reboot (rebootOnUpdate(false)) so a successful update can be
+    // logged before we restart into the new image -- otherwise the library reboots
+    // from inside update() and never returns, leaving no chance to log. Logging
+    // here is safe: the flash write is finished and WiFi is still up, unlike a log
+    // from inside an OTA progress callback mid-write. Only the update()/
+    // rebootOnUpdate calls + error string are platform-specific; result handling
+    // below stays common so no if/else straddles the #if branches.
 #if defined(ESP8266)
+    ESPhttpUpdate.rebootOnUpdate(false);
     HTTPUpdateResult r = ESPhttpUpdate.update(client, url, version);
     String err = (r == HTTP_UPDATE_FAILED) ? ESPhttpUpdate.getLastErrorString() : String();
 #elif defined(ESP32)
+    httpUpdate.rebootOnUpdate(false);
     HTTPUpdateResult r = httpUpdate.update(client, url, version);
     String err = (r == HTTP_UPDATE_FAILED) ? httpUpdate.getLastErrorString() : String();
 #else
 #error "avp::PullUpdateFromFleetServer requires ESP8266 or ESP32"
 #endif
 
+    if(r == HTTP_UPDATE_OK) {
+      // A new image was flashed. Log it (the new firmware's boot line reports the
+      // new version; this records the one being replaced), then reboot into it.
+      debug_printf("FW_UPDATE,was=%s\n", version);
+      ESP.restart(); // boot the freshly written image; does not return
+    }
     // Quiet on the common no-update case (this may be polled often); only
     // failures are logged, and the result is returned for the caller to act on.
     if(r == HTTP_UPDATE_FAILED) debug_printf("FleetServer OTA failed: %s\n", err.c_str());
