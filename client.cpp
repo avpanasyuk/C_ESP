@@ -57,7 +57,10 @@ namespace avp {
     // Non-200: build an informative error. errorToString returns a String;
     // store it in a named local so its buffer outlives sprintf_static's read.
     String errText = (httpCode < 0) ? HTTPClient::errorToString(httpCode) : String("HTTP status");
-    return sprintf_static("POST %s: code=%d (%s), free heap=%lu",
+    // Trailing newline: callers tee this through line-buffered sinks (e.g.
+    // FleetServerDebug), which flush only on '\n' -- without it this error
+    // concatenates onto the next logged line.
+    return sprintf_static("POST %s: code=%d (%s), free heap=%lu\n",
                           URL, httpCode, errText.c_str(), (unsigned long)ESP.getFreeHeap());
   } // HTTP_POST_puts
 
