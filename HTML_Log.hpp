@@ -8,7 +8,8 @@
  * @note there is a 0 at the end of filled string, so it can be used as a C string
  */
 #include <cstring>
-#include <C_General/Error.hpp>
+#include "C_General/Error.hpp"
+#include "C_General/General.hpp"
 
 namespace avp {
   class HTML_Log {
@@ -32,6 +33,14 @@ namespace avp {
     // a single timestamped entry plus "#" markers.
     static inline const char *(*GetTimestamp)() = nullptr;
 
+    /**
+     * @brief (Re)allocate the log buffer and set formatting. Called lazily by the
+     *        first Add/AddLine/Get, so explicit use is only needed to override
+     *        the defaults. Aborts if the allocation fails.
+     * @param DoTimeMarks_ prefix each new entry with GetTimestamp() (when set)
+     * @param size buffer capacity in bytes, excluding the trailing '\0'
+     * @param Break separator appended after entries (HTML line break)
+     */
     static void begin(bool DoTimeMarks_ = true, int size = DefaultSize, const char *Break = "<br>") {
       // should set all this stuff before assigning Text value
       Br = Break;
@@ -42,21 +51,25 @@ namespace avp {
       else Text[0] = 0;
     } // begin
 
+    /// @return the whole log as a NUL-terminated C string (allocates on first use).
     static const char *Get() {
       if(Text == nullptr) begin();
       return Text;
     }
 
+    /// @brief Append one newline-free line, computing its length. @see AddLine(const char*,int,bool)
     static void AddLine(const char *s, bool AddBreak = false) {
       AddLine(s, strlen(s), AddBreak);
     } // AddLine
 
     /**
-     * @brief there is no newlines in s
-     *
-     * @param s
-     * @param N
-     * @param AddBreak
+     * @brief Append one entry of @p N bytes, which must contain NO newline.
+     *        Identical consecutive entries collapse to a single entry followed
+     *        by '#' markers (dedup), and the oldest entries are dropped when the
+     *        buffer would overflow.
+     * @param s entry bytes (need not be NUL-terminated; @p N gives the length)
+     * @param N number of bytes of @p s to append
+     * @param AddBreak append the Break separator after the entry
      */
     static void AddLine(const char *s, const int N, bool AddBreak = false) {
       if(Text == nullptr) begin();
@@ -114,15 +127,16 @@ namespace avp {
     } // AddLine
 
     /**
-     * @brief function adds s to buffer Text, replacing '\n' with "<br>"
-     * can be multiline
-     * @param s
-     * @param AddBreak - adds "<br>" at the end of s.
+     * @brief Append @p s, splitting on '\n' so each line becomes its own
+     *        Break-terminated entry. Use this (not AddLine) for multi-line text.
+     * @param s NUL-terminated text, may contain newlines
+     * @param AddBreak append a trailing Break after the last line
      */
     static void Add(const char *s, bool AddBreak = false) {
       Add(s, strlen(s), AddBreak);
     } // Add
 
+    /// @brief Length-delimited Add(): splits the first @p N bytes of @p s on '\n'.
     static void Add(const char *s, const int N, bool AddBreak = false) {
       if(Text == nullptr) begin();
 
@@ -138,5 +152,9 @@ namespace avp {
         if(RemainderN > 0) Add(pos + 1, RemainderN, AddBreak);
       } else AddLine(s, N, AddBreak);
     } // Add
+
+    static void vprintf(const char *format, va_list ap) {
+      svprintf_puts(+[](const char* s){ Add(s); }, format, ap);
+    }
   }; // class HTML_Log
 } // namespace avp

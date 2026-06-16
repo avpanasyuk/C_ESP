@@ -9,8 +9,8 @@
 #endif
 
 #include "client.hpp"
-#include "C_General/General.h"
 #include "HTML_Log.hpp"
+#include "C_General/General.hpp"
 #include <stdarg.h>
 
 namespace avp {
@@ -22,6 +22,10 @@ namespace avp {
   // shipped -- and there is no point POSTing an error about a POST that just
   // failed. The local format buffer keeps this off the shared sprintf_static
   // buffer; HTML_Log::Add only appends to its own buffer.
+
+  PRINTF_WRAPPER_VOID(log_error, HTML_Log::vprintf);
+
+  /*
   static void log_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
   static void log_error(const char *fmt, ...) {
     char buf[160];
@@ -31,6 +35,7 @@ namespace avp {
     va_end(ap);
     HTML_Log::Add(buf);
   }
+  */
 
   /**
    * POST `s` (`sz` bytes) to `URL` with Content-Type text/plain.
