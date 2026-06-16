@@ -33,12 +33,14 @@ namespace avp {
     /**
    * @brief to be used with csv_logging_server.py
    *
-   * @param URL: like "http://192.168.1.100:8000/update"
+   * @param URL: like "http://bsd:8000/"
    * @param s: csv string, first entry is the name of file to store
-   * @return nullptr is succeded, error message if not.
+   * @return true on success; on failure returns false and logs the cause itself
+   *         to the /log (HTML_Log) buffer -- it posts nothing, so do NOT re-log
+   *         it through debug_puts.
    */
-  const char *HTTP_POST_puts(const char *URL, const char *s, size_t sz);
-  const char *HTTP_POST_puts(const char *URL, const char *s);
+  bool HTTP_POST_puts(const char *URL, const char *s, size_t sz);
+  bool HTTP_POST_puts(const char *URL, const char *s);
   String BSSIDtoString(const uint8_t *BSSID);
   /**
    * @brief scans all available networks and returns a table

@@ -18,8 +18,10 @@
  *
  * Designed to be safe to call from inside debug_puts():
  *   - line-buffers fragments, so one POST is sent per '\n' (one tidy row);
- *   - a re-entrancy guard stops the recursion that would otherwise happen
- *     because HTTP_POST_puts failures are themselves reported via debug_puts;
+ *   - HTTP_POST_puts logs its own failures to the /log (HTML_Log) buffer and
+ *     posts nothing (not debug_puts, not the shared sprintf_static buffer), so
+ *     shipping a line cannot recurse back here or corrupt the line being shipped;
+ *     a re-entrancy guard remains as belt-and-suspenders;
  *   - skips silently when WiFi is down or before begin();
  *   - commas inside a message land in extra columns (cosmetic).
  * Main-loop only: the POST blocks, so do NOT feed it from an ISR.
@@ -79,7 +81,10 @@ namespace avp {
       Busy = true;
       char body[MaxLine + 64];
       snprintf(body, sizeof body, "%s,%s,%s", LogFile, Name ? Name : "?", Line);
-      HTTP_POST_puts(URL, body); // result ignored on purpose -- never debug_puts here
+      // HTTP_POST_puts logs its own failures to the /log buffer and posts nothing
+      // (not debug_puts, not the shared sprintf_static buffer), so shipping a line
+      // can't recurse back here or clobber the line being shipped. Result unused.
+      HTTP_POST_puts(URL, body);
       Busy = false;
     }
   }; // class FleetServerDebug

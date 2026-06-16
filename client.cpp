@@ -10,13 +10,34 @@
 
 #include "client.hpp"
 #include "C_General/General.h"
+#include "HTML_Log.hpp"
+#include <stdarg.h>
 
 namespace avp {
+  // Log HTTP_POST_puts's own diagnostics into the local /log (HTML_Log) buffer.
+  // Deliberately NOT via debug_puts and NOT by POSTing: HTTP_POST_puts is the
+  // transport behind the FleetServerDebug debug_puts tee, so routing its errors
+  // through debug_puts (or POSTing them) would recurse into HTTP_POST_puts and,
+  // via the single shared sprintf_static buffer, clobber the very line being
+  // shipped -- and there is no point POSTing an error about a POST that just
+  // failed. The local format buffer keeps this off the shared sprintf_static
+  // buffer; HTML_Log::Add only appends to its own buffer.
+  static void log_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+  static void log_error(const char *fmt, ...) {
+    char buf[160];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    HTML_Log::Add(buf);
+  }
+
   /**
    * POST `s` (`sz` bytes) to `URL` with Content-Type text/plain.
-   * Returns nullptr on success (HTTP 200), or a static error string describing
-   * the failure (URL, WiFi state, HTTPClient errno+text, free heap) so that
-   * callers logging to a remote/HTML log buffer get something actionable.
+   * Returns true on success (HTTP 200). On failure it returns false and reports
+   * the cause (URL, WiFi state, HTTPClient errno+text, free heap) itself via
+   * log_error() -- callers must NOT re-log the failure through debug_puts (that
+   * is what HTTP_POST_puts implements, so it would recurse).
    *
    * Each call opens a fresh TCP connection (setReuse defaults to false). An
    * earlier version called setReuse(true) "to save reconnection cost", but
@@ -25,22 +46,25 @@ namespace avp {
    * HTTPC_ERROR_CONNECTION_FAILED (-1) -- HTTPClient kept trying to use the
    * dead socket. Fresh-connect-each-call is reliable for these low-rate POSTs.
    */
-  const char *HTTP_POST_puts(const char *URL, const char *s, size_t sz) {
+  bool HTTP_POST_puts(const char *URL, const char *s, size_t sz) {
     if(WiFi.status() != WL_CONNECTED) {
-      return sprintf_static("POST %s: WiFi not connected (status=%d)", URL, (int)WiFi.status());
+      log_error("POST %s: WiFi not connected (status=%d)\n", URL, (int)WiFi.status());
+      return false;
     }
 
     HTTPClient http;
 #ifdef ESP32
     if(!http.begin(URL)) {
-      return sprintf_static("POST %s: http.begin() failed", URL);
+      log_error("POST %s: http.begin() failed\n", URL);
+      return false;
     }
     http.addHeader("Content-Type", "text/plain");
 #endif
 #ifdef ESP8266
     WiFiClient client;
     if(!http.begin(client, URL)) {
-      return sprintf_static("POST %s: http.begin() failed (URL parse/connection setup)", URL);
+      log_error("POST %s: http.begin() failed (URL parse/connection setup)\n", URL);
+      return false;
     }
     http.addHeader("Content-Type", "text/plain");
 #endif
@@ -52,19 +76,15 @@ namespace avp {
     int httpCode = http.POST((uint8_t *)s, sz);
     http.end();
 
-    if(httpCode == 200) return nullptr;
+    if(httpCode == 200) return true;
 
-    // Non-200: build an informative error. errorToString returns a String;
-    // store it in a named local so its buffer outlives sprintf_static's read.
     String errText = (httpCode < 0) ? HTTPClient::errorToString(httpCode) : String("HTTP status");
-    // Trailing newline: callers tee this through line-buffered sinks (e.g.
-    // FleetServerDebug), which flush only on '\n' -- without it this error
-    // concatenates onto the next logged line.
-    return sprintf_static("POST %s: code=%d (%s), free heap=%lu\n",
-                          URL, httpCode, errText.c_str(), (unsigned long)ESP.getFreeHeap());
+    log_error("POST %s: code=%d (%s), free heap=%lu\n",
+               URL, httpCode, errText.c_str(), (unsigned long)ESP.getFreeHeap());
+    return false;
   } // HTTP_POST_puts
 
-  const char *HTTP_POST_puts(const char *URL, const char *s) {
+  bool HTTP_POST_puts(const char *URL, const char *s) {
     return HTTP_POST_puts(URL, s, strlen(s));
   } // HTTP_POST_puts
 } // namespace avp

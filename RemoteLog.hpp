@@ -34,8 +34,7 @@ namespace avp {
     }
 
     static void send(int total) {
-      auto e = HTTP_POST_puts(URL, Buf, total);
-      if(e != nullptr) debug_puts(e);
+      HTTP_POST_puts(URL, Buf, total); // self-reports failures via debug_putchar
     }
 
   public:
