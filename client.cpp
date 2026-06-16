@@ -9,33 +9,16 @@
 #endif
 
 #include "client.hpp"
-#include "HTML_Log.hpp"
 #include "C_General/General.hpp"
 #include <stdarg.h>
 
 namespace avp {
-  // Log HTTP_POST_puts's own diagnostics into the local /log (HTML_Log) buffer.
-  // Deliberately NOT via debug_puts and NOT by POSTing: HTTP_POST_puts is the
-  // transport behind the FleetServerDebug debug_puts tee, so routing its errors
-  // through debug_puts (or POSTing them) would recurse into HTTP_POST_puts and,
-  // via the single shared sprintf_static buffer, clobber the very line being
-  // shipped -- and there is no point POSTing an error about a POST that just
-  // failed. The local format buffer keeps this off the shared sprintf_static
-  // buffer; HTML_Log::Add only appends to its own buffer.
-
-  PRINTF_WRAPPER_VOID(log_error, HTML_Log::vprintf);
-
-  /*
-  static void log_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-  static void log_error(const char *fmt, ...) {
-    char buf[160];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof buf, fmt, ap);
-    va_end(ap);
-    HTML_Log::Add(buf);
+  static void error_sink(const char *s) { // see HTTP_POST_error_sink (client.hpp)
+    if(HTTP_POST_error_sink) HTTP_POST_error_sink(s);
+    else Serial.print(s);
   }
-  */
+  static void error_vprintf(const char *fmt, va_list ap) { svprintf_puts(error_sink, fmt, ap); }
+  PRINTF_WRAPPER_VOID(log_error, error_vprintf)
 
   /**
    * POST `s` (`sz` bytes) to `URL` with Content-Type text/plain.

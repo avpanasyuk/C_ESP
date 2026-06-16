@@ -35,9 +35,8 @@ namespace avp {
    *
    * @param URL: like "http://bsd:8000/"
    * @param s: csv string, first entry is the name of file to store
-   * @return true on success; on failure returns false and logs the cause itself
-   *         to the /log (HTML_Log) buffer -- it posts nothing, so do NOT re-log
-   *         it through debug_puts.
+   * @return true on success; false on failure (reported via HTTP_POST_error_sink,
+   *         never POSTed or sent through debug_puts).
    */
   bool HTTP_POST_puts(const char *URL, const char *s, size_t sz);
   bool HTTP_POST_puts(const char *URL, const char *s);

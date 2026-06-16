@@ -29,6 +29,7 @@ using HTTPUpdateServer = ESP8266HTTPUpdateServer;
 #include "C_ARDUINO/General.h"
 #include "StaticWiFi_Conn.hpp"
 #include "HTML_Log.hpp"
+#include "client.hpp" // avp::HTTP_POST_error_sink
 
 namespace avp {
   class avp::Print DebugPrint(debug_puts);
@@ -106,6 +107,7 @@ namespace avp {
     static void begin(const Options_t &Opts = DefaultOpts()) {
       Options = Opts;
       HTML_Log::begin(Options.LogSize);
+      HTTP_POST_error_sink = +[](const char *s) { HTML_Log::Add(s, true); }; // report failures to /log
       StaticWiFi_Conn::begin(Opts);
 
       on("/", []() {
