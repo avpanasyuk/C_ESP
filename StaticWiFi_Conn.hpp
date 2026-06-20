@@ -195,9 +195,7 @@ namespace avp {
 
       if(ssid == "") open_AP();
       else {
-#ifdef NAME
-        WiFi.setHostname(NAME);
-#endif
+        WiFi.setHostname(Name); // configured per-device name, consistent with MDNS/OTA/softAP below
 
         // Let's see what we have here
         WiFi.mode(WIFI_STA);
