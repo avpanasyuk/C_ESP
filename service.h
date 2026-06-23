@@ -41,6 +41,19 @@ namespace avp {
   bool HTTP_POST_puts(const char *URL, const char *s, size_t sz);
   bool HTTP_POST_puts(const char *URL, const char *s);
   String BSSIDtoString(const uint8_t *BSSID);
+
+  /**
+   * @brief Per-chip device name "<prefix>-XXYYZZ" built from the last 3 bytes of
+   *        the WiFi MAC (e.g. "Soil-A1B2C3"). The MAC is hardware-fixed, so this
+   *        works before WiFi connects and costs no radio power. Built once and
+   *        cached; the returned pointer is to a static, process-lifetime buffer.
+   *        Use it for WiFi.hostname(), ArduinoOTA.setHostname(), the boot log, and
+   *        <name>.csv log filenames so a device's network identity is consistent.
+   *
+   * @param prefix short device-type prefix, typically the NAME macro
+   * @return pointer to the cached NUL-terminated name
+   */
+  const char *DeviceName(const char *prefix);
   /**
    * @brief scans all available networks and returns a table
    *

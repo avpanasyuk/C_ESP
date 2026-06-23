@@ -90,6 +90,16 @@ namespace avp {
       BSSID[0], BSSID[1], BSSID[2], BSSID[3], BSSID[4], BSSID[5]);
   } // BSSIDtoString
 
+  const char *DeviceName(const char *prefix) {
+    static char name[32]; // prefix (<=24) + "-XXYYZZ" + NUL
+    if(name[0] == '\0') {
+      uint8_t mac[6];
+      WiFi.macAddress(mac);
+      snprintf(name, sizeof name, "%s-%02X%02X%02X", prefix, mac[3], mac[4], mac[5]);
+    }
+    return name;
+  } // DeviceName
+
   const String &scan() {
     static String WiFi_Around;
     WiFi_Around.reserve(512); // reserve buffer for response to avoid dynamic memory allocation
