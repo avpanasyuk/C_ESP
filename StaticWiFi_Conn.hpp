@@ -27,6 +27,17 @@
 
 inline constexpr const char *LittleFS_AUTH = "/net_auth.txt";
 
+// Compile-time WiFi fallback credentials. Define WIFI_DEFAULT_SSID / WIFI_DEFAULT_PASS
+// at build time (e.g. from a gitignored secrets.ini) to bake a default network into the
+// firmware; empty here so NO credentials live in this (public) source. With an empty
+// default SSID an unprovisioned device opens its /config softAP instead of connecting.
+#ifndef WIFI_DEFAULT_SSID
+#define WIFI_DEFAULT_SSID ""
+#endif
+#ifndef WIFI_DEFAULT_PASS
+#define WIFI_DEFAULT_PASS ""
+#endif
+
 #if defined(DO_OTA) && DO_OTA
 #include <ArduinoOTA.h>
 #endif
@@ -123,7 +134,7 @@ namespace avp {
     };
 
     static const Options_t &DefaultOpts() {
-      static Options_t Opts{NAME, "L", "group224", Blinken};
+      static Options_t Opts{NAME, WIFI_DEFAULT_SSID, WIFI_DEFAULT_PASS, Blinken};
       return Opts;
     } // Default
 
