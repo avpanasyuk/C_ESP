@@ -391,6 +391,14 @@ namespace avp {
       } else debug_puts("Failed to open stored credentials file!\n");
     } // StoreAUTH
 
+    /// Erase the LittleFS-stored WiFi credentials so the device reverts to its
+    /// compile-time default (or the /config softAP if built without one) on reboot.
+    static void ForgetAUTH() {
+      ssid = pass = "";
+      if(LittleFS.remove(LittleFS_AUTH)) debug_puts("Erased stored credentials\n");
+      else debug_puts("No stored credentials to erase\n");
+    } // ForgetAUTH
+
     static void AsyncStartScanNetworks() {
       ConnStatus = Status_t::SCANNING;
       WiFi.mode(WIFI_STA);

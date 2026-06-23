@@ -128,7 +128,8 @@ namespace avp {
                   "<li> <em>config?ssid=</em>......<em>&pass=</em>......</li>"
                   "<li> <a href='/log'>log</a> - outputs debug log</li>"
                   "<li> <a href='/update'>update</a> - update firmware</li>"
-                  "<li> <a href='/reset' onclick='return confirm(\"Reboot?\")'>reset</a> - reboots MCU</li>");
+                  "<li> <a href='/reset' onclick='return confirm(\"Reboot?\")'>reset</a> - reboots MCU</li>"
+                  "<li> <a href='/forget' onclick='return confirm(\"Erase WiFi credentials and reboot?\")'>forget</a> - erase stored WiFi creds, revert to default</li>");
         Resp += Options.AddUsage;
         Resp += ShowWiFiAndEntry();
         Resp += "</html>";
@@ -178,6 +179,13 @@ namespace avp {
 
       on("/reset", []() {
         send("text/plain", "Resetting ...");
+        delay(1000);
+        ESP.restart();
+      });
+
+      on("/forget", []() {
+        ForgetAUTH();
+        send("text/plain", "Stored WiFi credentials erased; rebooting to the build-time default.");
         delay(1000);
         ESP.restart();
       });
