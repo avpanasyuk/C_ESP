@@ -189,7 +189,7 @@ namespace avp {
           ssid.trim();
           pass = f.readStringUntil('\n');
           pass.trim();
-          debug_printf("Stored credentials: %s, %s\n", ssid.c_str(), pass.c_str());
+          debug_printf("Stored credentials for SSID: %s\n", ssid.c_str()); // never log the password
         } else debug_puts("Failed to open stored credentials file!\n");
       } else debug_puts("No stored credentials found!\n");
 
