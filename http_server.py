@@ -6,9 +6,9 @@ POST  /<anypath>  body: filename-or-email,csv,data,...
                   If filename-or-email contains '@' it's treated as an email
                   recipient: the SECOND CSV field is the subject and the rest
                   is the body. Otherwise (default) the row is appended to
-                  <log-dir>/<filename> with a Unix-epoch timestamp prepended
-                  (matches the legacy readout_*.py CSV format so MATLAB
-                  analysis of pre-existing files keeps working).
+                  <log-dir>/<filename> with a sortable, human-readable local
+                  timestamp prepended: 'YYYY-MM-DD HH:MM:SS.hh' (hundredth-second).
+                  Parses directly in Python and MATLAB and converts back to epoch.
 
 GET   /firmware/<name>.bin                       -> serves <firmware-dir>/<name>.bin. Returns
                                                     304 (device skips re-flashing) when the
@@ -72,14 +72,16 @@ class ESPDataHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_length)
             data = body.decode('utf-8').strip()
 
-            # Two timestamps: file mode uses Unix epoch (matches the legacy
-            # readout_*.py CSV output so MATLAB analysis keeps working);
-            # email mode uses human-readable (epoch in a notification is
-            # unfriendly); console log lines also use human-readable.
-            # Truncate epoch to 2 decimals (10 ms) -- 60-Hz sampling has no
-            # need for the ~16-digit precision Python's default str() produces.
-            ts_epoch = f"{time.time():.2f}"
-            ts_human = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            # Prepend a sortable, human-readable LOCAL timestamp to logged rows:
+            #   'YYYY-MM-DD HH:MM:SS.hh'  (hundredth-second, truncated)
+            # Sorts lexicographically = chronologically, and round-trips to epoch:
+            #   Python: datetime.strptime(s, '%Y-%m-%d %H:%M:%S.%f').timestamp()
+            #   MATLAB: posixtime(datetime(s,'InputFormat','yyyy-MM-dd HH:mm:ss.SS', ...
+            #                              'TimeZone','local'))
+            # (both parse in the server's local zone). Console/email keep ms precision.
+            now = datetime.now()
+            ts_csv = now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]   # hundredths: CSV log
+            ts_human = now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]  # ms: console + email
             parts = [p.strip() for p in data.split(',')]
 
             if not parts:
@@ -129,7 +131,7 @@ class ESPDataHandler(BaseHTTPRequestHandler):
             try:
                 csv_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(csv_path, 'a') as f:
-                    f.write(','.join([ts_epoch] + csv_data) + '\n')
+                    f.write(','.join([ts_csv] + csv_data) + '\n')
                 # Cap file size so a chatty/looping device can't fill the disk:
                 # past the limit, rotate to <file>.1 (replacing any old .1) and
                 # let a fresh file start. Bounds each log to ~2x max_log_bytes.
