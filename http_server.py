@@ -34,7 +34,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 
@@ -63,6 +63,11 @@ class ESPDataHandler(BaseHTTPRequestHandler):
     firmware_dir = None
     mail_bin = "mail"
     max_log_bytes = 10 * 1024 * 1024   # rotate a log file to .1 once it grows past this
+    # Per-request socket timeout: a client that opens a connection but never sends
+    # a complete request is dropped after this many seconds instead of blocking the
+    # worker. Paired with ThreadingHTTPServer below so one stuck/half-open client
+    # (e.g. a crash-looping ESP) can never wedge the whole sink.
+    timeout = 15
 
     # -- POST: data logging or email ---------------------------------------------------
 
@@ -272,7 +277,11 @@ GET   /firmware/<name>.bin
     if args.firmware_dir and not os.path.isdir(args.firmware_dir):
         print(f"Warning: firmware-dir '{args.firmware_dir}' does not exist", file=sys.stderr)
 
-    server = HTTPServer((args.host, args.port), ESPDataHandler)
+    # ThreadingHTTPServer: each request runs in its own (daemon) thread, so one
+    # slow/stuck/half-open client cannot block all the others (the single-threaded
+    # HTTPServer would wedge the whole sink in that case).
+    server = ThreadingHTTPServer((args.host, args.port), ESPDataHandler)
+    server.daemon_threads = True
     print(f"HTTP server listening on http://{args.host}:{args.port}")
     print(f"  log dir:      {args.dir}")
     print(f"  firmware dir: {args.firmware_dir or '(disabled)'}")
