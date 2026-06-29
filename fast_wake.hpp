@@ -15,9 +15,10 @@
  *   - If the fast-path begin() fails to associate, fall back to the slow path
  *     (FindBestAP + DHCP) and overwrite the cache on success.
  *
- * Storage: RTC user memory survives deep-sleep but is lost on power-cycle / hard
- * reset. Caller picks the dword offset (default 0). For projects that already
- * use RTC memory for other state, pass an offset past their existing structures.
+ * Storage: RTC memory survives deep-sleep but is lost on power-cycle / hard reset.
+ * On ESP8266 it is the rtcUserMemory block addressed by a dword offset (default 0;
+ * pass an offset past any other RTC structures the project keeps). On ESP32 it is a
+ * single RTC_DATA_ATTR backing store (one cache per device) and the offset is ignored.
  *
  * CRC32 (Ethernet polynomial) validates the read; a power-cycled chip with
  * garbage in RTC memory will fail the check and fall back to slow boot.
@@ -47,19 +48,34 @@ namespace avp {
   };
   static_assert(sizeof(FastWakeWiFi) % 4 == 0, "RTC writes are dword-aligned");
 
-  /// Read FastWakeWiFi from RTC user memory at the given dword offset. Returns
-  /// true iff the read succeeded and the CRC matches (i.e. the cache is valid).
+  /// Read FastWakeWiFi from RTC memory (dword offset is ESP8266-only, ignored on
+  /// ESP32). Returns true iff the read succeeded and the CRC matches (cache valid).
+#ifdef ESP8266
   inline bool ReadFastWakeWiFi(FastWakeWiFi &out, uint32_t rtc_off_dwords = 0) {
     if(!ESP.rtcUserMemoryRead(rtc_off_dwords, (uint32_t *)&out, sizeof(out))) return false;
     return out.crc == ::Crc32((const uint8_t *)&out, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
   }
 
-  /// Compute the CRC and write to RTC user memory at the given dword offset.
+  /// Compute the CRC and write to RTC memory at the given dword offset.
   /// Mutates `in.crc`. Safe to call from any normal context.
   inline void WriteFastWakeWiFi(FastWakeWiFi &in, uint32_t rtc_off_dwords = 0) {
     in.crc = ::Crc32((const uint8_t *)&in, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
     ESP.rtcUserMemoryWrite(rtc_off_dwords, (uint32_t *)&in, sizeof(in));
   }
+#elif defined(ESP32)
+  // ESP32 has no rtcUserMemory API; a single RTC_DATA_ATTR backing store survives deep
+  // sleep and is re-initialised to zero (-> CRC fails -> slow boot) on power-on / hard
+  // reset. One cache per device; the offset arg is kept for API parity but ignored.
+  inline RTC_DATA_ATTR FastWakeWiFi fastWakeStore;
+  inline bool ReadFastWakeWiFi(FastWakeWiFi &out, uint32_t = 0) {
+    out = fastWakeStore;
+    return out.crc == ::Crc32((const uint8_t *)&out, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
+  }
+  inline void WriteFastWakeWiFi(FastWakeWiFi &in, uint32_t = 0) {
+    in.crc = ::Crc32((const uint8_t *)&in, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
+    fastWakeStore = in;
+  }
+#endif
 
   /// Capture the current WiFi STA association into `out`. Call after
   /// WiFi.status() == WL_CONNECTED on the slow path. Does NOT write the CRC --
