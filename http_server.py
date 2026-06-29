@@ -12,14 +12,15 @@ POST  /<anypath>  body: filename-or-email,csv,data,...
 
 GET   /firmware/<name>.bin                       -> serves <firmware-dir>/<name>.bin. Returns
                                                     304 (device skips re-flashing) when the
-                                                    device's x-ESP8266-sketch-md5 matches
-                                                    md5(<name>.bin). Used by ESPhttpUpdate for
-                                                    cheap polling.
+                                                    device's sketch MD5 matches md5(<name>.bin).
+                                                    Used by ESP8266 ESPhttpUpdate / ESP32
+                                                    httpUpdate for cheap polling.
 
-ESPhttpUpdate sends x-ESP8266-sketch-md5 (the running sketch's MD5) on every poll, and
-md5(<name>.bin) equals that for a matching image -- so it's the reliable "already running
-this?" test. The library does NOT send If-Modified-Since, so the mtime check is only a
-fallback. The x-ESP8266-version string is logged for visibility.
+The update library sends the running sketch's MD5 on every poll (x-ESP8266-sketch-md5 on
+ESP8266, x-ESP32-sketch-md5 on ESP32 -- both accepted), and md5(<name>.bin) equals that for
+a matching image -- so it's the reliable "already running this?" test. The library does NOT
+send If-Modified-Since, so the mtime check is only a fallback. The version string
+(x-ESP8266-version / x-ESP32-version) is logged for visibility.
 
 Email mode requires a working `mail(1)` binary in PATH and a local MTA
 (sendmail/postfix) that can relay or deliver. Tested on FreeBSD bsd.
@@ -183,13 +184,17 @@ class ESPDataHandler(BaseHTTPRequestHandler):
         # truncate to whole seconds (HTTP date precision)
         file_mtime = file_mtime.replace(microsecond=0)
 
-        device_version = self.headers.get('x-ESP8266-version', '?')
+        device_version = (self.headers.get('x-ESP8266-version')
+                          or self.headers.get('x-ESP32-version', '?'))
 
-        # Primary dedup: ESPhttpUpdate sends the running sketch's MD5 on every
+        # Primary dedup: the update library sends the running sketch's MD5 on every
         # poll, and md5(<name>.bin) equals that for a matching image -- an equal
         # MD5 means the device already runs this firmware. (The library does NOT
         # send If-Modified-Since, so the date check below is only a fallback.)
-        device_md5 = self.headers.get('x-ESP8266-sketch-md5')
+        # ESP8266 (ESPhttpUpdate) sends x-ESP8266-sketch-md5; ESP32 (httpUpdate)
+        # sends x-ESP32-sketch-md5 -- accept either so dedup works for both.
+        device_md5 = (self.headers.get('x-ESP8266-sketch-md5')
+                      or self.headers.get('x-ESP32-sketch-md5'))
         if device_md5 and device_md5 == hashlib.md5(path.read_bytes()).hexdigest():
             print(f"[firmware] GET {self.path} (device fw={device_version}) -> 304 (md5 match)")
             self.send_response(304)
@@ -253,7 +258,7 @@ POST  body format (email mode): address@host.dom,subject,body...
   Requires `mail(1)` and a working local MTA.
 
 GET   /firmware/<name>.bin
-  Serves <firmware-dir>/<name>.bin; 304 when the device's x-ESP8266-sketch-md5 already
+  Serves <firmware-dir>/<name>.bin; 304 when the device's sketch MD5 (x-ESP8266- or x-ESP32-) already
   matches md5(<name>.bin). Drop a fresh .bin and the next polling device picks it up.
 ''',
     )
