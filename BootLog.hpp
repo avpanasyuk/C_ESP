@@ -1,15 +1,20 @@
 /**
  * @file BootLog.hpp
- * @brief One-line device boot record for the fleet debug log.
+ * @brief Device lifecycle records (BOOT + SLEEP) for the fleet debug log.
  *
- * avp::LogBoot() emits a tidy CSV row via debug_printf (so it reaches whatever
- * sink the project wired -- e.g. FleetServerDebug -> Debug_log.csv):
+ * avp::LogBoot() / avp::LogSleep() emit a tidy CSV row via debug_printf (so it
+ * reaches whatever sink the project wired -- e.g. FleetServerDebug -> Debug_log.csv):
  *
  *   BOOT,fw=<version>,rev=<rev>,reason=<reset-reason>[,<extra>]
+ *   SLEEP,for=<seconds|until-wake>[,<extra>]
  *
- * Call it once per boot AFTER the network sink can ship (e.g. after WiFi is up);
- * a debug sink that drops pre-connect output would otherwise discard it. `extra`
- * carries project-specific fields (e.g. "wake=60min") and may be nullptr.
+ * LogSleep() is the bookend to LogBoot(): call it right before deep sleep, so a BOOT
+ * with no following SLEEP flags a device that crashed mid-cycle, and the duration
+ * tells a monitor when to expect the next wake.
+ *
+ * Call them AFTER the network sink can ship (e.g. after WiFi is up); a debug sink that
+ * drops pre-connect output would otherwise discard them. `extra` carries project-
+ * specific fields (e.g. "wake=60min") and may be nullptr.
  *
  * The reason uses the ESP8266 getResetReason() vocabulary; the ESP32 path maps
  * esp_reset_reason() onto the same strings so fleet logs read consistently.
@@ -62,4 +67,15 @@ namespace avp {
     else
       debug_printf("\nBOOT,fw=%s,rev=%s,reason=%s\n", version, rev, reasonStr);
   } // LogBoot
+
+  /// Emit one SLEEP row to the fleet debug log -- the lifecycle bookend to LogBoot,
+  /// posted right before deep sleep. `sleep_s` is the deep-sleep length in seconds
+  /// (0 = sleeps until an external wake, e.g. an event-driven device). `extra` is
+  /// optional project-specific CSV column(s), or nullptr.
+  inline void LogSleep(uint32_t sleep_s, const char *extra = nullptr) {
+    const char *e   = (extra && *extra) ? extra : "";
+    const char *sep = *e ? "," : "";
+    if(sleep_s) debug_printf("\nSLEEP,for=%us%s%s\n", (unsigned)sleep_s, sep, e);
+    else        debug_printf("\nSLEEP,for=until-wake%s%s\n", sep, e);
+  } // LogSleep
 } // namespace avp
