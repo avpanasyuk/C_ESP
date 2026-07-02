@@ -110,5 +110,7 @@ namespace avp {
     } // CreateTimer
   }; // HW_Timer
 
-  void IRAM_ATTR onHW_Interrupt() { HW_Timer_ms<>::_onHW_Interrupt(); } // IRAM_ATTR does not work in template class static members
+  // Free function (not a template static member — IRAM_ATTR doesn't apply there). inline so a header
+  // included by more than one TU doesn't multiply-define it at link.
+  inline void IRAM_ATTR onHW_Interrupt() { HW_Timer_ms<>::_onHW_Interrupt(); }
 } // namespace avp
