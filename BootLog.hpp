@@ -5,7 +5,7 @@
  * avp::LogBoot() / avp::LogSleep() emit a tidy CSV row via debug_printf (so it
  * reaches whatever sink the project wired -- e.g. FleetServerDebug -> Debug_log.csv):
  *
- *   BOOT,fw=<version>,rev=<rev>,reason=<reset-reason>[,<extra>]
+ *   BOOT,fw=<version>,rev=<rev>,reason=<reset-reason>,rssi=<dBm>[,vcc=<mV>][,vlow=<mV>][,<extra>]
  *   SLEEP,for=<seconds|until-wake>[,<extra>]
  *
  * LogSleep() is the bookend to LogBoot(): call it right before deep sleep, so a BOOT
@@ -24,8 +24,10 @@
 
 #if defined(ESP8266)
 #include <Esp.h>
+#include <ESP8266WiFi.h>
 #elif defined(ESP32)
 #include <esp_system.h>
+#include <WiFi.h>
 #endif
 
 #include "C_General/Error.hpp" // debug_printf (overridable)
@@ -51,9 +53,14 @@ namespace avp {
 #endif
 
   /// Emit one BOOT row to the fleet debug log. `rev` is the build's git revision
-  /// (project-injected, e.g. the GIT_REV macro); `extra` is optional
-  /// project-specific text appended as further CSV column(s), or nullptr.
-  inline void LogBoot(const char *version, const char *rev, const char *extra = nullptr) {
+  /// (project-injected, e.g. the GIT_REV macro). `rssi` is read here so every device
+  /// reports link quality uniformly. `vcc_mV` (0 = omit) is the supply/battery voltage;
+  /// `vlow_mV` (0 = omit) is this build's low-battery WARN threshold -- pass
+  /// avp::LowVcc_mV(kBattery) (Battery.hpp) so a monitor learns each device's threshold
+  /// from its own boot line, with nothing to configure per device. `extra` carries only
+  /// genuinely project-specific fields (e.g. "wake=60min"), or nullptr.
+  inline void LogBoot(const char *version, const char *rev, const char *extra = nullptr,
+                      uint16_t vcc_mV = 0, uint16_t vlow_mV = 0) {
 #if defined(ESP8266)
     String      reason    = ESP.getResetReason();
     const char *reasonStr = reason.c_str();
@@ -62,10 +69,14 @@ namespace avp {
 #else
 #error "avp::LogBoot requires ESP8266 or ESP32"
 #endif
-    if(extra && *extra)
-      debug_printf("\nBOOT,fw=%s,rev=%s,reason=%s,%s\n", version, rev, reasonStr, extra);
-    else
-      debug_printf("\nBOOT,fw=%s,rev=%s,reason=%s\n", version, rev, reasonStr);
+    char tail[80];
+    tail[0] = '\0';
+    int n = 0;
+    if(vcc_mV)  n += snprintf(tail + n, sizeof tail - n, ",vcc=%u", (unsigned)vcc_mV);
+    if(vlow_mV) n += snprintf(tail + n, sizeof tail - n, ",vlow=%u", (unsigned)vlow_mV);
+    if(extra && *extra) snprintf(tail + n, sizeof tail - n, ",%s", extra);
+    debug_printf("\nBOOT,fw=%s,rev=%s,reason=%s,rssi=%ld%s\n",
+                 version, rev, reasonStr, (long)WiFi.RSSI(), tail);
   } // LogBoot
 
   /// Emit one SLEEP row to the fleet debug log -- the lifecycle bookend to LogBoot,
