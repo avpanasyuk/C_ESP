@@ -1,0 +1,37 @@
+{
+  "_README": "Copy to /usr/local/etc/fleet_alarm.json on bsd and tune. Thresholds are ACTUAL battery mV; see fleet_alarm.md. Devices NOT listed under low_vcc.devices are never battery-checked (mains devices IrrCntrl/PowerMonitor whose last column is not vcc). caliper reports no vcc column. Email uses bsd's already-configured mailer (sendmail -> ssmtp); this daemon holds no SMTP credentials.",
+  "log_dir": "/mnt/T",
+  "state_file": "/var/db/fleet_alarm/state.json",
+  "poll_s": 5,
+  "mail": {
+    "to": ["alexander.panasyuk@gmail.com"],
+    "from": "fleet_alarm@bsd",
+    "sendmail": "/usr/sbin/sendmail"
+  },
+  "popup_targets": ["Z790:8765"],
+  "rules": {
+    "event": [
+      {
+        "file_glob": "WaterLeak-*.csv",
+        "column": 1,
+        "equals": "LEAK",
+        "message": "WATER LEAK: {device}",
+        "color": "#b00020",
+        "rate_limit_s": 300,
+        "popup_seconds": 0
+      }
+    ],
+    "low_vcc": {
+      "enabled": true,
+      "rate_limit_s": 86400,
+      "color": "#b06a00",
+      "popup_seconds": 0,
+      "devices": {
+        "WaterLeak-*": 3200,
+        "Soil-*": 3200,
+        "SoilTH-*": 3200,
+        "Soil32-*": { "threshold": 2900, "scale": 2 }
+      }
+    }
+  }
+}
