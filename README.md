@@ -28,6 +28,33 @@ resolves the cross-includes.
 ## Build requirements it imposes on the consumer
 
 - `board_build.filesystem = littlefs` — WiFi credentials live in LittleFS.
+- **`WIFI_DEFAULT_SSID` / `WIFI_DEFAULT_PASS` — inject these, or risk unreachable
+  devices.** They are the compile-time WiFi fallback used whenever LittleFS
+  `/net_auth.txt` holds no valid creds (a fresh unit, after `/forget`, or a unit
+  that was only ever connecting via the *previous* firmware's baked-in default).
+  Both default to `""`, and **an empty default makes such a device come up in
+  `/config`-SoftAP-only mode after a (re)flash — unreachable over the LAN, which
+  is fatal for a physically inaccessible module.** Provisioning a unit once via
+  `/config` (which writes LittleFS) is *not* sufficient safety on its own; always
+  bake a real fallback too. Inject it from a **gitignored `secrets.ini`** so the
+  password never enters git:
+
+  ```ini
+  ; platformio.ini
+  [platformio]
+  extra_configs = secrets.ini
+  [common]                     ; (or [env] — wherever build_flags live)
+  build_flags = ... -DWIFI_DEFAULT_SSID=\"${secrets.wifi_ssid}\"
+                    -DWIFI_DEFAULT_PASS=\"${secrets.wifi_pass}\"
+
+  ; secrets.ini  (gitignored; commit a secrets.ini.example placeholder instead)
+  [secrets]
+  wifi_ssid = YourSSID
+  wifi_pass = YourPassword
+  ```
+  Add `secrets.ini` to `.gitignore`. Leaving the default **blank is correct only**
+  when every unit is provisioned by hand through its `/config` SoftAP and none is
+  ever out of physical reach.
 - `-DNAME=\"YourName\"` — used for hostname / mDNS and the default device name.
 - `-DDO_OTA=1` — required for the ArduinoOTA (`espota`) upload path.
 - `build_src_filter` must list the `.cpp`/`.c` TUs you actually use, e.g.
