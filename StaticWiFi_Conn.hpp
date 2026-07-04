@@ -38,6 +38,18 @@ inline constexpr const char *LittleFS_AUTH = "/net_auth.txt";
 #define WIFI_DEFAULT_PASS ""
 #endif
 
+// Fail the build when no default SSID is baked in, unless the consumer explicitly
+// opts into SoftAP-only provisioning. An empty default has repeatedly stranded
+// reflashed devices in /config-SoftAP mode, unreachable over the LAN (fatal for a
+// physically inaccessible module). Inject it from secrets.ini (see README), or
+// build with -DWIFI_ALLOW_EMPTY_DEFAULT when every unit is hand-provisioned via /config.
+#ifndef WIFI_ALLOW_EMPTY_DEFAULT
+static_assert(sizeof(WIFI_DEFAULT_SSID) > 1,
+              "WIFI_DEFAULT_SSID is empty: a device with no stored LittleFS creds will come up "
+              "SoftAP-only and may be unreachable. Inject WIFI_DEFAULT_SSID/PASS from a gitignored "
+              "secrets.ini (see C_ESP README), or build with -DWIFI_ALLOW_EMPTY_DEFAULT to intend it.");
+#endif
+
 #if defined(DO_OTA) && DO_OTA
 #include <ArduinoOTA.h>
 #if defined(ESP32)
