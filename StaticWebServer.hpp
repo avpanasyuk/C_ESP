@@ -32,8 +32,7 @@ using HTTPUpdateServer = ESP8266HTTPUpdateServer;
 #include "client.hpp" // avp::HTTP_POST_error_sink
 
 namespace avp {
-  class avp::Print DebugPrint(debug_puts);
-  // static void dot() { debug_puts("."); }
+  inline avp::Print DebugPrint(debug_puts); // inline: header included by >1 TU must not multiply-define it
 
   /**
    * @brief This is interface class for static Sync WebServer

@@ -38,8 +38,23 @@ inline constexpr const char *LittleFS_AUTH = "/net_auth.txt";
 #define WIFI_DEFAULT_PASS ""
 #endif
 
+// Fail the build when no default SSID is baked in, unless the consumer explicitly
+// opts into SoftAP-only provisioning. An empty default has repeatedly stranded
+// reflashed devices in /config-SoftAP mode, unreachable over the LAN (fatal for a
+// physically inaccessible module). Inject it from secrets.ini (see README), or
+// build with -DWIFI_ALLOW_EMPTY_DEFAULT when every unit is hand-provisioned via /config.
+#ifndef WIFI_ALLOW_EMPTY_DEFAULT
+static_assert(sizeof(WIFI_DEFAULT_SSID) > 1,
+              "WIFI_DEFAULT_SSID is empty: a device with no stored LittleFS creds will come up "
+              "SoftAP-only and may be unreachable. Inject WIFI_DEFAULT_SSID/PASS from a gitignored "
+              "secrets.ini (see C_ESP README), or build with -DWIFI_ALLOW_EMPTY_DEFAULT to intend it.");
+#endif
+
 #if defined(DO_OTA) && DO_OTA
 #include <ArduinoOTA.h>
+#if defined(ESP32)
+#include <esp_ota_ops.h> // OTA image rollback (confirm-or-revert); ESP32 bootloader only
+#endif
 #endif
 
 #if defined(ESP8266)
@@ -142,6 +157,22 @@ namespace avp {
     static inline uint32_t OTA_LastActivity_ms;            ///< millis() of last OTA start/progress, for the stall watchdog
     static constexpr uint32_t OTA_StallTimeout_ms = 30000; ///< no OTA progress for this long => assume the upload died
 
+#if defined(DO_OTA) && DO_OTA && defined(ESP32)
+    static inline bool RollbackPending = false; ///< running image is PENDING_VERIFY: confirm once recoverable, else revert
+    static constexpr uint32_t OTA_ConfirmTimeout_ms = 5UL * 60 * 1000; ///< reach STA or SoftAP within this of boot, else roll back
+
+    /// Cancel a pending OTA rollback. Called once a freshly-flashed image reaches a *recoverable*
+    /// state -- STA connected OR a working SoftAP (both let the user reach /config) -- so it is good
+    /// enough to keep. Rollback is reserved for an image that reaches neither (crash/hang/bootloop).
+    static void ConfirmOTAImage() {
+      if(RollbackPending) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        RollbackPending = false;
+        debug_puts("OTA image confirmed valid (rollback cancelled)\n");
+      }
+    } // ConfirmOTAImage
+#endif
+
     static constexpr uint8_t STR_SIZE = 32;          ///< ssid and password string sizes
     static constexpr int32_t MinRSSIdiffToJump = 20; // dB
   protected:
@@ -177,6 +208,19 @@ namespace avp {
       ssid = default_ssid;
       pass = default_pass;
       status_indication_func = status_indication_func_;
+
+#if defined(DO_OTA) && DO_OTA && defined(ESP32)
+      // If we booted a freshly-OTA'd image, the bootloader left it PENDING_VERIFY: we must confirm
+      // it valid (see ConfirmOTAImage) once we reach STA or SoftAP, or it is rolled back on reboot.
+      {
+        const esp_partition_t *running = esp_ota_get_running_partition();
+        esp_ota_img_states_t st;
+        if(running && esp_ota_get_state_partition(running, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
+          RollbackPending = true;
+          debug_puts("OTA image on probation: confirm on connect/SoftAP, else roll back\n");
+        }
+      }
+#endif
 
       // I have to setup Blinken here to see all connection process
       pTimer = &avp::HW_Timer_ms<>::CreateTimer(status_tick, 200, true); // can not use lambda here as 
@@ -293,6 +337,9 @@ namespace avp {
         debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
       ConnStatus = Status_t::CONNECTED;
       RescanTO.Reset();
+#if defined(DO_OTA) && DO_OTA && defined(ESP32)
+      ConfirmOTAImage(); // back online -> a freshly-flashed image has proven itself
+#endif
 #if defined(ESP8266)
       // Re-publish mDNS records on every (re)connect that brought a fresh IP.
       // Fires from ALL ConfirmConnected paths -- not just TRYING_TO_CONNECT --
@@ -350,6 +397,9 @@ namespace avp {
       debug_printf("Waiting for connection in AP mode, IP:%s! (left STA status=%d)\n",
         (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str(),
         sta_status);
+#if defined(DO_OTA) && DO_OTA && defined(ESP32)
+      ConfirmOTAImage(); // SoftAP is a valid recovery surface (user can reach /config) -> keep the image
+#endif
     } // open_AP
 
     static String getIP() { return ip.toString(); }
@@ -450,6 +500,18 @@ namespace avp {
         debug_puts("OTA stalled -- rebooting to recover");
         ESP.restart();
       }
+#if defined(ESP32)
+      // Last-resort rollback: a freshly-flashed image that reaches neither STA nor SoftAP within
+      // OTA_ConfirmTimeout_ms (wedged in SCANNING/TRYING, etc.) is broken -- revert to last-good.
+      // ConfirmOTAImage() already cleared RollbackPending on any STA/SoftAP success, so this only
+      // fires when the image is genuinely unreachable. (A full hang/crash is handled separately:
+      // the bootloader auto-rolls-back a still-PENDING_VERIFY image on the next reset.)
+      if(RollbackPending && millis() > OTA_ConfirmTimeout_ms) {
+        debug_puts("OTA image reached neither STA nor SoftAP -- rolling back to previous firmware\n");
+        delay(100);
+        esp_ota_mark_app_invalid_rollback_and_reboot(); // does not return on success
+      }
+#endif
 #endif
 #if defined(ESP8266)
       MDNS.update();
