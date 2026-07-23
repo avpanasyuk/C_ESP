@@ -5,8 +5,14 @@
  * avp::LogBoot() / avp::LogSleep() emit a tidy CSV row via debug_printf (so it
  * reaches whatever sink the project wired -- e.g. FleetServerDebug -> Debug_log.csv):
  *
- *   BOOT,fw=<version>,rev=<rev>,reason=<reset-reason>,rssi=<dBm>[,vcc=<mV>][,vlow=<mV>][,<extra>]
+ *   BOOT,fw=<version>,rev=<rev>,reason=<reset-reason>,rssi=<dBm>,md5=<sketch-md5>[,vcc=<mV>][,vlow=<mV>][,<extra>]
  *   SLEEP,for=<seconds|until-wake>[,<extra>]
+ *
+ * The md5 is ESP.getSketchMD5() -- the running image's flash MD5, identical to
+ * md5(<NAME>.bin) on the fleet server. A BOOT row carrying it is the server-side OTA
+ * "confirm": it proves the image booted far enough to raise WiFi and post, so the fleet
+ * OTA watchdog (fleet_ota_watchdog.py on bsd) treats that image as good -- and reverts +
+ * blacklists any freshly pulled image that gets deployed but never posts such a line.
  *
  * LogSleep() is the bookend to LogBoot(): call it right before deep sleep, so a BOOT
  * with no following SLEEP flags a device that crashed mid-cycle, and the duration
@@ -75,8 +81,10 @@ namespace avp {
     if(vcc_mV)  n += snprintf(tail + n, sizeof tail - n, ",vcc=%u", (unsigned)vcc_mV);
     if(vlow_mV) n += snprintf(tail + n, sizeof tail - n, ",vlow=%u", (unsigned)vlow_mV);
     if(extra && *extra) snprintf(tail + n, sizeof tail - n, ",%s", extra);
-    debug_printf("\nBOOT,fw=%s,rev=%s,reason=%s,rssi=%ld%s\n",
-                 version, rev, reasonStr, (long)WiFi.RSSI(), tail);
+    // md5 = the running image's flash MD5 (== md5(<NAME>.bin) on the fleet server): the
+    // server-side OTA "confirm" that this image booted far enough to post. See file header.
+    debug_printf("\nBOOT,fw=%s,rev=%s,reason=%s,rssi=%ld,md5=%s%s\n",
+                 version, rev, reasonStr, (long)WiFi.RSSI(), ESP.getSketchMD5().c_str(), tail);
   } // LogBoot
 
   /// Emit one SLEEP row to the fleet debug log -- the lifecycle bookend to LogBoot,

@@ -38,6 +38,13 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
+# Fleet OTA confirm/blacklist state (sibling module). Optional: if it can't import, the
+# server runs exactly as before -- OTA-safety recording just goes dark.
+try:
+    import fleet_ota
+except ImportError:
+    fleet_ota = None
+
 
 EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
 
@@ -62,6 +69,7 @@ def send_mail(recipient, subject, body, mail_bin="mail"):
 class ESPDataHandler(BaseHTTPRequestHandler):
     log_dir = None
     firmware_dir = None
+    ota = None            # fleet_ota.FleetOTA instance, or None (OTA-safety disabled)
     mail_bin = "mail"
     max_log_bytes = 10 * 1024 * 1024   # rotate a log file to .1 once it grows past this
     # Per-request socket timeout: a client that opens a connection but never sends
@@ -148,6 +156,22 @@ class ESPDataHandler(BaseHTTPRequestHandler):
             except IOError as e:
                 print(f"  Error writing CSV: {e}")
 
+            # Fleet OTA confirm: a device's BOOT row carries "md5=<hex>" (its running image)
+            # and, in the FleetServerDebug format "<file>,<name>,<line>", csv_data[0] is the
+            # device name. That the row arrived proves the image booted far enough to raise
+            # WiFi and post -> record it as healthy so the watchdog won't revert it. Never
+            # let this break the log write.
+            if self.ota is not None and fleet_ota is not None and csv_data:
+                try:
+                    md5 = fleet_ota.extract_md5_token(csv_data)
+                    if md5:
+                        device = csv_data[0]
+                        name = fleet_ota.firmware_name_from_device(device)
+                        self.ota.record_confirm(name, md5, device)
+                        print(f"  [ota] confirm {name} md5={md5[:8]} by {device}")
+                except Exception as e:
+                    print(f"  [ota] confirm recording failed: {e}")
+
             self._send(200, b'OK')
 
         except Exception as e:
@@ -187,6 +211,23 @@ class ESPDataHandler(BaseHTTPRequestHandler):
         device_version = (self.headers.get('x-ESP8266-version')
                           or self.headers.get('x-ESP32-version', '?'))
 
+        name = path.stem          # "<NAME>.bin" -> "<NAME>" (matches the watchdog)
+        file_md5 = hashlib.md5(path.read_bytes()).hexdigest()
+
+        # Fleet OTA blacklist guard: an image whose md5 was reverted as bad must never be
+        # served again (a re-drop of the same bytes). Answer 304 "no update" so the device
+        # keeps its current image. Fail open -- a state error must not block firmware.
+        if self.ota is not None and fleet_ota is not None:
+            try:
+                if self.ota.is_blacklisted(name, file_md5):
+                    print(f"[firmware] GET {self.path} -> 304 (BLACKLISTED md5={file_md5[:8]})")
+                    self.send_response(304)
+                    self.send_header('Last-Modified', email.utils.format_datetime(file_mtime, usegmt=True))
+                    self.end_headers()
+                    return
+            except Exception as e:
+                print(f"[firmware] [ota] blacklist check failed (serving anyway): {e}")
+
         # Primary dedup: the update library sends the running sketch's MD5 on every
         # poll, and md5(<name>.bin) equals that for a matching image -- an equal
         # MD5 means the device already runs this firmware. (The library does NOT
@@ -195,7 +236,7 @@ class ESPDataHandler(BaseHTTPRequestHandler):
         # sends x-ESP32-sketch-md5 -- accept either so dedup works for both.
         device_md5 = (self.headers.get('x-ESP8266-sketch-md5')
                       or self.headers.get('x-ESP32-sketch-md5'))
-        if device_md5 and device_md5 == hashlib.md5(path.read_bytes()).hexdigest():
+        if device_md5 and device_md5 == file_md5:
             print(f"[firmware] GET {self.path} (device fw={device_version}) -> 304 (md5 match)")
             self.send_response(304)
             self.send_header('Last-Modified', email.utils.format_datetime(file_mtime, usegmt=True))
@@ -219,6 +260,21 @@ class ESPDataHandler(BaseHTTPRequestHandler):
 
         size = path.stat().st_size
         print(f"[firmware] GET {self.path} (device fw={device_version}) -> 200 OK, {size} bytes")
+
+        # Fleet OTA: record that this device is about to flash file_md5, so the watchdog can
+        # tell a deployed-and-pulled image (must confirm) from one no device has fetched yet
+        # (leave alone). Device id = its STA MAC (stable), else chip id / version.
+        if self.ota is not None and fleet_ota is not None:
+            try:
+                device = (self.headers.get('x-ESP8266-STA-MAC')
+                          or self.headers.get('x-ESP32-STA-MAC')
+                          or self.headers.get('x-ESP8266-Chip-ID')
+                          or f"fw={device_version}")
+                self.ota.record_pull(name, file_md5, device)
+                print(f"  [ota] pull {name} md5={file_md5[:8]} by {device}")
+            except Exception as e:
+                print(f"  [ota] pull recording failed: {e}")
+
         self.send_response(200)
         self.send_header('Content-Type', 'application/octet-stream')
         self.send_header('Content-Length', str(size))
@@ -281,6 +337,15 @@ GET   /firmware/<name>.bin
 
     if args.firmware_dir and not os.path.isdir(args.firmware_dir):
         print(f"Warning: firmware-dir '{args.firmware_dir}' does not exist", file=sys.stderr)
+
+    # Enable fleet OTA confirm/blacklist recording when serving firmware. Optional: if the
+    # sibling module is missing the server still logs + serves exactly as before.
+    if args.firmware_dir and fleet_ota is not None:
+        ESPDataHandler.ota = fleet_ota.FleetOTA(args.firmware_dir)
+        print(f"  fleet OTA:    on (state {fleet_ota.STATE_BASENAME}, "
+              f"confirm window {fleet_ota.CONFIRM_WINDOW_S}s)")
+    else:
+        print(f"  fleet OTA:    off ({'no firmware dir' if not args.firmware_dir else 'fleet_ota.py missing'})")
 
     # ThreadingHTTPServer: each request runs in its own (daemon) thread, so one
     # slow/stuck/half-open client cannot block all the others (the single-threaded

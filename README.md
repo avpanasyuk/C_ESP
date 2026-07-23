@@ -23,7 +23,9 @@ resolves the cross-includes.
 | `hw_timer.hpp` | `avp::HW_Timer_ms<>::CreateTimer(fn, ms, autoreload)`. |
 | `fast_wake.hpp`, `pcnt_ll.h` | Fast-wake and pulse-counter low-level helpers. |
 | `common_esp.cpp` | Out-of-line implementations for `service.h`. |
-| `http_server.py` | Companion server: writes each POSTed `<filename>,<csv>` body to `<log-dir>/<filename>` with a timestamp column prepended, **and** serves firmware at `/firmware/<name>.bin` for `FleetServerOTA.hpp` (MD5-gated: 304 when the device already runs the image). Rotates a log to `<file>.1` once it passes `--max-log-bytes` (default 10 MiB) so a chatty device can't fill the disk. |
+| `http_server.py` | Companion server: writes each POSTed `<filename>,<csv>` body to `<log-dir>/<filename>` with a timestamp column prepended, **and** serves firmware at `/firmware/<name>.bin` for `FleetServerOTA.hpp` (MD5-gated: 304 when the device already runs the image). Rotates a log to `<file>.1` once it passes `--max-log-bytes` (default 10 MiB) so a chatty device can't fill the disk. Also records fleet-OTA pulls/confirms and refuses to serve a blacklisted MD5 (see `fleet_ota.py`). |
+| `fleet_ota.py` | Server-authoritative OTA confirm/blacklist state shared by `http_server.py` and `fleet_ota_watchdog.py`. Identity is the image MD5 (what the device already reports). `<NAME>.bin.good` is the last image a device confirmed healthy. A device confirms an image by posting a `BootLog` BOOT row carrying `md5=<sketch-md5>` — proof it booted far enough to raise WiFi. Stdlib only; flock-guarded state file `<fw-dir>/.fleet_ota_state.json`. |
+| `fleet_ota_watchdog.py` | Cron sweep (owns all firmware-file mutation): bootstraps an unknown `<NAME>.bin` as good, promotes a confirmed image to `<NAME>.bin.good`, and — only for a name whose fleet has ever emitted an `md5=` confirm — reverts + blacklists a `<NAME>.bin` that was pulled by a device but stayed unconfirmed past `--window-s`. The per-name confirm gate makes it safe to enable before the `md5=` firmware finishes rolling out. `-F <fw-dir> [--email a] [--dry-run] [-v]`. |
 
 ## Build requirements it imposes on the consumer
 
