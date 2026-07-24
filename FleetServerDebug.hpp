@@ -40,7 +40,10 @@
 
 namespace avp {
   class FleetServerDebug {
-    static constexpr size_t MaxLine = 160;
+    // Sized for the richest single line: a crash BOOT row carries fw/rev/reason/rssi/md5
+    // (32 hex) + vcc/vlow + the project's crash fields (event/wifi/crashed_in/exccause/epc1/
+    // excvaddr) ~= 190 chars. 160 split those across two rows (losing excvaddr); keep margin.
+    static constexpr size_t MaxLine = 256;
     static inline char        Line[MaxLine];
     static inline size_t      Len     = 0;
     static inline bool        Busy    = false;       // re-entrancy guard
