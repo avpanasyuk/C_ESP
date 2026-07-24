@@ -1,13 +1,16 @@
 """Top-most banner popup for a fleet alarm.
 
 Launched detached (via pythonw) by alarm_listener.py. Renders a centered,
-always-on-top banner on the monitor under the cursor and closes on a timeout or
-on the first user activity (mouse move / key press). Modeled on the user's
-~/.claude/attention_popup.py.
+always-on-top banner on the monitor under the cursor.
 
     pythonw popup_banner.py "<message>" [bg_hex] [seconds]
 
 seconds = 0 -> persistent until the user dismisses it (default for alarms).
+
+Dismissal takes a deliberate act -- a click on the banner, or Esc/Enter/Space
+while it holds focus. It deliberately does NOT close on mere mouse movement:
+this carries alarms (water leak, flat battery) that must survive the user
+brushing the mouse without reading them.
 """
 
 import sys
@@ -64,11 +67,8 @@ def main():
 
     tk.Label(root, text=message, bg=bg, fg="white",
              font=("Segoe UI", 22, "bold"), wraplength=w - 40).pack(expand=True, fill="both")
-
-    # Dismiss on activity. Baseline the cursor so we ignore where it already is.
-    baseline = wintypes.POINT() if _user32 else None
-    if _user32:
-        _user32.GetCursorPos(ctypes.byref(baseline))
+    tk.Label(root, text="click to dismiss", bg=bg, fg="white",
+             font=("Segoe UI", 9)).pack(side="bottom", pady=6)
 
     def close(*_):
         try:
@@ -77,17 +77,18 @@ def main():
             pass
 
     root.bind("<Button>", close)
-    root.bind("<Key>", close)
+    root.bind("<Escape>", close)
+    root.bind("<Return>", close)
+    root.bind("<space>", close)
+    root.focus_force()                   # so the key bindings reach us
 
-    def poll_activity():
-        if _user32:
-            pt = wintypes.POINT()
-            _user32.GetCursorPos(ctypes.byref(pt))
-            if abs(pt.x - baseline.x) > 4 or abs(pt.y - baseline.y) > 4:
-                return close()
-        root.after(120, poll_activity)
+    # Re-assert topmost: a full-screen app (game, video) that grabs the foreground
+    # after us would otherwise cover an alarm the user never sees.
+    def keep_on_top():
+        root.attributes("-topmost", True)
+        root.after(2000, keep_on_top)
 
-    root.after(200, poll_activity)       # small grace so the launch mouse-move is ignored
+    keep_on_top()
     if seconds > 0:
         root.after(int(seconds * 1000), close)
     root.mainloop()
