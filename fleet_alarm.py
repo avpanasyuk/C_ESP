@@ -26,6 +26,7 @@ import argparse
 import fnmatch
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -43,10 +44,20 @@ def load_config(path):
 
 
 class State:
-    """Per-file read offsets + per-(device,rule) last-alarm times, persisted to JSON."""
+    """Per-file read offsets + per-(device,rule) last-alarm times, persisted to JSON.
 
-    def __init__(self, path):
+    offsets creep forward on nearly every poll, so saving unconditionally rewrote this
+    file once per poll_s -- on ZFS that dirties a whole record in every transaction
+    group, for a few bytes of moved offset. save() therefore coalesces: it writes at
+    most once per flush_s, but ALWAYS writes through immediately when last_alarm
+    changed. That keeps alarm rate-limiting exact across a restart; the only thing a
+    stale offset costs is re-reading up to flush_s of already-seen rows, and any alarm
+    they re-trigger is suppressed by the (already persisted) rate limiter.
+    """
+
+    def __init__(self, path, flush_s=60):
         self.path = path
+        self.flush_s = flush_s
         self.offsets = {}
         self.last_alarm = {}
         if path and os.path.exists(path):
@@ -56,14 +67,31 @@ class State:
                 self.last_alarm = d.get("last_alarm", {})
             except Exception as e:
                 log(f"WARN could not read state {path}: {e}")
+        self._saved = self._payload()
+        self._saved_alarms = json.dumps(self.last_alarm, sort_keys=True)
+        self._saved_at = time.monotonic()
 
-    def save(self):
+    def _payload(self):
+        return json.dumps({"offsets": self.offsets, "last_alarm": self.last_alarm},
+                          sort_keys=True)
+
+    def save(self, force=False):
         if not self.path:
+            return
+        payload = self._payload()
+        if payload == self._saved:
+            return
+        alarms = json.dumps(self.last_alarm, sort_keys=True)
+        if not (force or alarms != self._saved_alarms or
+                time.monotonic() - self._saved_at >= self.flush_s):
             return
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"offsets": self.offsets, "last_alarm": self.last_alarm}, f)
+            f.write(payload)
         os.replace(tmp, self.path)
+        self._saved = payload
+        self._saved_alarms = alarms
+        self._saved_at = time.monotonic()
 
 
 def matches_any(name, globs):
@@ -205,16 +233,25 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config(args.config)
-    state = State(cfg.get("state_file"))
+    state = State(cfg.get("state_file"), cfg.get("state_flush_s", 60))
     poll_s = cfg.get("poll_s", 5)
 
     seed = not state.offsets  # first run: seed offsets to EOF
     if seed:
         log("first run: seeding offsets to end-of-file (history not alarmed)")
     scan(cfg, state, seed)
-    state.save()
+    state.save(force=True)
     if args.once:
         return
+
+    # Flush the coalesced offsets on a clean stop (service stop / reboot) so a
+    # restart resumes where it left off instead of re-reading the last flush_s.
+    def _flush_and_exit(signum, frame):
+        state.save(force=True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _flush_and_exit)
+    signal.signal(signal.SIGINT, _flush_and_exit)
 
     log(f"fleet_alarm watching {cfg['log_dir']} every {poll_s}s")
     while True:
