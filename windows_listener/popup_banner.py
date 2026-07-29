@@ -48,10 +48,25 @@ def cursor_monitor_geometry():
     return (r.left, r.top, r.right - r.left, r.bottom - r.top)
 
 
+def text_colors(bg):
+    """(main, subtext) foreground for an arbitrary banner colour.
+
+    The colour is chosen per-rule in bsd's fleet_alarm.json, so alarms can be told apart at a
+    glance -- the water leak is light blue precisely because it must not read as Claude Code's
+    red attention banner. Hardcoded white text would be unreadable on any such light colour."""
+    try:
+        r, g, b = (int(bg[i:i + 2], 16) for i in (1, 3, 5))
+    except (ValueError, IndexError):
+        return "white", "#e8e8e8"           # named colour or malformed hex: assume dark
+    light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 140  # Rec.709 luma
+    return ("black", "#404040") if light else ("white", "#e8e8e8")
+
+
 def main():
     message = sys.argv[1] if len(sys.argv) > 1 else "Fleet alarm"
     bg = sys.argv[2] if len(sys.argv) > 2 else "#b00020"   # red
     seconds = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0  # 0 = persistent
+    fg, sub_fg = text_colors(bg)
 
     mx, my, mw, mh = cursor_monitor_geometry()
 
@@ -65,9 +80,9 @@ def main():
     y = my + (mh - h) // 3
     root.geometry(f"{w}x{h}+{x}+{y}")
 
-    tk.Label(root, text=message, bg=bg, fg="white",
+    tk.Label(root, text=message, bg=bg, fg=fg,
              font=("Segoe UI", 22, "bold"), wraplength=w - 40).pack(expand=True, fill="both")
-    tk.Label(root, text="click to dismiss", bg=bg, fg="white",
+    tk.Label(root, text="click to dismiss", bg=bg, fg=sub_fg,
              font=("Segoe UI", 9)).pack(side="bottom", pady=6)
 
     def close(*_):
