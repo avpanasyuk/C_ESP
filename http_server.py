@@ -72,6 +72,9 @@ class ESPDataHandler(BaseHTTPRequestHandler):
     ota = None            # fleet_ota.FleetOTA instance, or None (OTA-safety disabled)
     mail_bin = "mail"
     max_log_bytes = 10 * 1024 * 1024   # rotate a log file to .1 once it grows past this
+    # -v: echo each accepted POST. Off by default -- the row is already stored
+    # verbatim (same timestamp) in the CSV under log_dir, so echoing duplicates it.
+    verbose = False
     # Per-request socket timeout: a client that opens a connection but never sends
     # a complete request is dropped after this many seconds instead of blocking the
     # worker. Paired with ThreadingHTTPServer below so one stuck/half-open client
@@ -137,10 +140,11 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                 print(f"\n[{ts_human}] Rejected out-of-dir filename: {filename!r}")
                 self._send(400, b'Bad filename')
                 return
-            print(f"\n[{ts_human}] Received data:")
-            print(f"  File: {filename}")
-            print(f"  Data: {', '.join(csv_data)}")
-            print(f"  Size: {len(data)} bytes")
+            if self.verbose:
+                print(f"\n[{ts_human}] Received data:")
+                print(f"  File: {filename}")
+                print(f"  Data: {', '.join(csv_data)}")
+                print(f"  Size: {len(data)} bytes")
 
             try:
                 csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,10 +155,11 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                 # let a fresh file start. Bounds each log to ~2x max_log_bytes.
                 if csv_path.stat().st_size > self.max_log_bytes:
                     csv_path.replace(Path(str(csv_path) + '.1'))
-                    print(f"  Rotated {filename} (> {self.max_log_bytes} bytes)")
-                print(f"  Written to: {csv_path.absolute()}")
+                    print(f"[{ts_human}] Rotated {filename} (> {self.max_log_bytes} bytes)")
+                if self.verbose:
+                    print(f"  Written to: {csv_path.absolute()}")
             except IOError as e:
-                print(f"  Error writing CSV: {e}")
+                print(f"[{ts_human}] Error writing CSV {csv_path}: {e}")
 
             # Fleet OTA confirm: a device's BOOT row carries "md5=<hex>" (its running image)
             # and, in the FleetServerDebug format "<file>,<name>,<line>", csv_data[0] is the
@@ -168,9 +173,9 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                         device = csv_data[0]
                         name = fleet_ota.firmware_name_from_device(device)
                         self.ota.record_confirm(name, md5, device)
-                        print(f"  [ota] confirm {name} md5={md5[:8]} by {device}")
+                        print(f"[{ts_human}] [ota] confirm {name} md5={md5[:8]} by {device}")
                 except Exception as e:
-                    print(f"  [ota] confirm recording failed: {e}")
+                    print(f"[{ts_human}] [ota] confirm recording failed: {e}")
 
             self._send(200, b'OK')
 
@@ -328,12 +333,16 @@ GET   /firmware/<name>.bin
                         help='Path to mail(1) binary used for email-mode POSTs (default: mail)')
     parser.add_argument('--max-log-bytes', type=int, default=10 * 1024 * 1024,
                         help='Rotate a log file to <file>.1 once it exceeds this size (default: 10 MiB)')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Echo every accepted POST to stdout. Off by default: the CSV row '
+                             'already holds the same data and timestamp, so this only duplicates it.')
     args = parser.parse_args()
 
     ESPDataHandler.log_dir = args.dir
     ESPDataHandler.firmware_dir = args.firmware_dir
     ESPDataHandler.mail_bin = args.mail_bin
     ESPDataHandler.max_log_bytes = args.max_log_bytes
+    ESPDataHandler.verbose = args.verbose
 
     if args.firmware_dir and not os.path.isdir(args.firmware_dir):
         print(f"Warning: firmware-dir '{args.firmware_dir}' does not exist", file=sys.stderr)
