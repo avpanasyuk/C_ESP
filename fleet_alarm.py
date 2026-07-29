@@ -3,13 +3,20 @@
 
 Pairs with http_server.py (the fleet log sink): that appends every device's POSTed
 row to <log_dir>/<device>.csv; this tails those files and fires an alarm when a row
-matches a configured rule. Two rule kinds:
+matches a configured rule. Three rule kinds:
 
   * event   -- a named column equals a value (e.g. WaterLeak's event column == "LEAK").
   * low_vcc -- the last column (the fleet-uniform vcc_mV) drops below a per-device
                threshold. ONLY devices listed in the config's allowlist are checked,
                so mains-powered devices (IrrCntrl, PowerMonitor) whose last column is
                not a battery voltage are never mis-flagged.
+  * stale   -- no row at all for longer than a per-device limit. This is the one that
+               catches a dead device: a pack going flat does NOT produce a low reading,
+               it browns the module out mid-wake and the posts simply stop, so SILENCE
+               is the only signal there is. Devices that would otherwise be silent for
+               months (WaterLeak sleeps until it gets wet) emit a periodic heartbeat row
+               for this rule to watch; set the limit to ~2x their heartbeat interval so
+               one missed report -- an AP reboot, a failed post -- is not an alarm.
 
 An alarm sends an email (Gmail SMTP + app password) and GETs each Windows popup
 listener (alarm_listener.py) to raise a persistent banner. Every alarm is rate-limited
@@ -111,6 +118,17 @@ def threshold_for(device, low):
     return None, 1
 
 
+def stale_limit_for(device, stale):
+    """Max silence in seconds for an allowlisted device, or None (device not watched).
+    A device value may be a bare number (seconds) or {"max_silence_s": X}."""
+    for glob, spec in stale.get("devices", {}).items():
+        if fnmatch.fnmatch(device, glob):
+            if isinstance(spec, dict):
+                return spec.get("max_silence_s")
+            return spec
+    return None
+
+
 def send_email(cfg, subject, body):
     """Hand the message to bsd's configured mailer (sendmail -> ssmtp). We do NOT own
     any SMTP/credentials here -- the system mailer is already set up; -t reads the
@@ -188,6 +206,38 @@ def handle_line(cfg, state, device, line):
                      secs=low.get("popup_seconds", 0))
 
 
+def check_stale(cfg, state):
+    """Alarm on devices that have gone silent. Unlike the row rules this reads no content --
+    the file's mtime IS the last-heard time, since http_server.py only ever appends.
+
+    A device that has never posted has no file and so is never flagged: there is nothing to
+    have gone stale, and inventing an expected-device list here would fire on every device
+    that is legitimately retired. The rate limiter (persisted in the state file) is what keeps
+    a device that stays dead from mailing on every poll, and keeps a daemon restart quiet."""
+    stale = cfg.get("rules", {}).get("stale", {})
+    if not stale.get("enabled"):
+        return
+    log_dir, now = cfg["log_dir"], time.time()
+    for fn in sorted(os.listdir(log_dir)):
+        if not fn.endswith(".csv") or fn.endswith("-header.csv"):
+            continue
+        device = fn[:-4]
+        max_s = stale_limit_for(device, stale)
+        if not max_s:
+            continue
+        try:
+            age = now - os.path.getmtime(os.path.join(log_dir, fn))
+        except OSError:
+            continue
+        if age < max_s:
+            continue
+        msg = f"SILENT: {device}, no report in {age / 86400:.1f} days"
+        fire(cfg, state, device, "stale", stale.get("rate_limit_s", 86400),
+             subject=msg, body=f"{msg} (expected at least every {max_s / 86400:.1f} days)",
+             popup_msg=msg, color=stale.get("color", "#b06a00"),
+             secs=stale.get("popup_seconds", 0))
+
+
 def watched_globs(cfg):
     globs = [r["file_glob"] for r in cfg.get("rules", {}).get("event", [])]
     globs += list(cfg.get("rules", {}).get("low_vcc", {}).get("devices", {}).keys())
@@ -240,6 +290,10 @@ def main():
     if seed:
         log("first run: seeding offsets to end-of-file (history not alarmed)")
     scan(cfg, state, seed)
+    # Unlike the row rules, staleness IS checked on the seeding run: a device that is
+    # already dead is exactly what we want to hear about at startup, and history cannot
+    # re-trigger it (mtime is a single current fact, and fire() is rate-limited).
+    check_stale(cfg, state)
     state.save(force=True)
     if args.once:
         return
@@ -258,6 +312,7 @@ def main():
         time.sleep(poll_s)
         try:
             scan(cfg, state, False)
+            check_stale(cfg, state)
             state.save()
         except Exception as e:
             log(f"ERROR scan: {e}")

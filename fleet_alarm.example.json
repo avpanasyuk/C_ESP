@@ -16,7 +16,8 @@
         "column": 1,
         "equals": "LEAK",
         "message": "WATER LEAK: {device}",
-        "color": "#b00020",
+        "_color": "light blue, deliberately NOT red -- Claude Code's attention banner is red (#d62828) and the two are otherwise indistinguishable at a glance. popup_banner.py picks dark text for light backgrounds.",
+        "color": "#5bc0de",
         "rate_limit_s": 300,
         "popup_seconds": 0
       }
@@ -31,6 +32,16 @@
         "Soil-*": 3200,
         "SoilTH-*": 3200,
         "Soil32-*": { "threshold": 2900, "scale": 2 }
+      }
+    },
+    "stale": {
+      "_README": "Silence alarm -- the only thing that catches a dead device (a flat pack stops posting, it does not post a low reading). max_silence_s is in SECONDS and must be ~2x the device's own reporting interval so one missed report is not an alarm. WaterLeak pings weekly (HEARTBEAT_S in its main.cpp) -> 14 days.",
+      "enabled": true,
+      "rate_limit_s": 86400,
+      "color": "#b06a00",
+      "popup_seconds": 0,
+      "devices": {
+        "WaterLeak-*": 1209600
       }
     }
   }
