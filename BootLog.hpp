@@ -5,7 +5,7 @@
  * avp::LogBoot() / avp::LogSleep() emit a tidy CSV row via debug_printf (so it
  * reaches whatever sink the project wired -- e.g. FleetServerDebug -> Debug_log.csv):
  *
- *   BOOT,fw=<version>,rev=<rev>,reason=<reset-reason>,rssi=<dBm>,md5=<sketch-md5>[,vcc=<mV>][,vlow=<mV>][,<extra>]
+ *   BOOT,fw=<version>,rev=<rev>,reason=<reset-reason>,rssi=<dBm>[,md5=<sketch-md5>][,vcc=<mV>][,vlow=<mV>][,<extra>]
  *   SLEEP,for=<seconds|until-wake>[,<extra>]
  *
  * The md5 is ESP.getSketchMD5() -- the running image's flash MD5, identical to
@@ -65,8 +65,15 @@ namespace avp {
   /// avp::LowVcc_mV(kBattery) (Battery.hpp) so a monitor learns each device's threshold
   /// from its own boot line, with nothing to configure per device. `extra` carries only
   /// genuinely project-specific fields (e.g. "wake=60min"), or nullptr.
+  ///
+  /// `with_md5 = false` omits the md5 field. ESP.getSketchMD5() reads the ENTIRE image
+  /// back out of flash (~600 cache-disabling spi_flash_read calls, ~0.5 s for a 315 KB
+  /// sketch) with the radio up -- a real cost on a battery device that wakes for ~1 s.
+  /// The fleet-OTA watchdog only needs one confirm per deployed image, and a freshly
+  /// OTA'd image always boots with reason "Software/System restart", so a deep-sleep
+  /// device can safely pass false on its routine timer/event wakes and still confirm.
   inline void LogBoot(const char *version, const char *rev, const char *extra = nullptr,
-                      uint16_t vcc_mV = 0, uint16_t vlow_mV = 0) {
+                      uint16_t vcc_mV = 0, uint16_t vlow_mV = 0, bool with_md5 = true) {
 #if defined(ESP8266)
     String      reason    = ESP.getResetReason();
     const char *reasonStr = reason.c_str();
@@ -75,16 +82,29 @@ namespace avp {
 #else
 #error "avp::LogBoot requires ESP8266 or ESP32"
 #endif
-    char tail[80];
+    // Must hold ",vcc=" + ",vlow=" (19) plus the longest project `extra`; a crash row
+    // ("event=,wifi=,crashed_in=,exccause=,epc1=,excvaddr=") is 79. Undersizing this
+    // truncates SILENTLY and costs exactly the fields a crash report exists for: an
+    // 80-byte tail cut every `extra` at 59 chars, dropping excvaddr and the low two
+    // hex digits of epc1, which left decoded PCs ambiguous across whole functions.
+    char   tail[160];
+    size_t n = 0;
     tail[0] = '\0';
-    int n = 0;
-    if(vcc_mV)  n += snprintf(tail + n, sizeof tail - n, ",vcc=%u", (unsigned)vcc_mV);
-    if(vlow_mV) n += snprintf(tail + n, sizeof tail - n, ",vlow=%u", (unsigned)vlow_mV);
+    // snprintf returns the length it WANTED to write, so clamp before reusing it as an
+    // offset -- otherwise one truncating field makes (sizeof tail - n) underflow.
+    auto add = [&tail, &n](const char *fmt, unsigned v) {
+      int w = snprintf(tail + n, sizeof tail - n, fmt, v);
+      if(w > 0) n = (n + (size_t)w < sizeof tail) ? n + (size_t)w : sizeof tail - 1;
+    };
+    if(vcc_mV)  add(",vcc=%u", vcc_mV);
+    if(vlow_mV) add(",vlow=%u", vlow_mV);
     if(extra && *extra) snprintf(tail + n, sizeof tail - n, ",%s", extra);
     // md5 = the running image's flash MD5 (== md5(<NAME>.bin) on the fleet server): the
     // server-side OTA "confirm" that this image booted far enough to post. See file header.
-    debug_printf("\nBOOT,fw=%s,rev=%s,reason=%s,rssi=%ld,md5=%s%s\n",
-                 version, rev, reasonStr, (long)WiFi.RSSI(), ESP.getSketchMD5().c_str(), tail);
+    String md5 = with_md5 ? ESP.getSketchMD5() : String();
+    debug_printf("\nBOOT,fw=%s,rev=%s,reason=%s,rssi=%ld%s%s%s\n",
+                 version, rev, reasonStr, (long)WiFi.RSSI(),
+                 md5.length() ? ",md5=" : "", md5.c_str(), tail);
   } // LogBoot
 
   /// Emit one SLEEP row to the fleet debug log -- the lifecycle bookend to LogBoot,

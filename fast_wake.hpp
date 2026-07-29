@@ -62,6 +62,17 @@ namespace avp {
     in.crc = ::Crc32((const uint8_t *)&in, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
     ESP.rtcUserMemoryWrite(rtc_off_dwords, (uint32_t *)&in, sizeof(in));
   }
+
+  /// Force the next ReadFastWakeWiFi() to fail, so the caller falls back to a full scan
+  /// + fresh DHCP. Needed because a stale cache still *associates* -- the failure only
+  /// shows up later as unreachable hosts (a lease reassigned while the device slept, an
+  /// AP that moved), and nothing else invalidates it. Deliberately stores a deliberately
+  /// wrong CRC rather than zeros, whose CRC is a valid value like any other.
+  inline void InvalidateFastWakeWiFi(uint32_t rtc_off_dwords = 0) {
+    FastWakeWiFi bad{};
+    bad.crc = ~::Crc32((const uint8_t *)&bad, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
+    ESP.rtcUserMemoryWrite(rtc_off_dwords, (uint32_t *)&bad, sizeof(bad));
+  }
 #elif defined(ESP32)
   // ESP32 has no rtcUserMemory API; a single RTC_DATA_ATTR backing store survives deep
   // sleep and is re-initialised to zero (-> CRC fails -> slow boot) on power-on / hard
