@@ -68,9 +68,17 @@ namespace avp {
     static void call_in_loop() {
       StaticWiFi_Conn::call_in_loop();
       s.handleClient();
+      // Report a failed OTA ONCE. UpdaterClass::_error is sticky -- _reset() leaves it
+      // alone and only begin()'s clearError() drops it -- so a bare hasError() test here
+      // re-fires every loop pass, forever if nothing starts another update (a fleet pull
+      // answering 304 never calls begin()). That floods any debug_puts sink that is not
+      // deduped: a POSTing sink ships one blocking request per pass, which either buries
+      // the fleet server or, when it is unreachable, wedges loop() at the POST timeout.
+      // Clearing after reporting also re-arms us for the next, genuinely new failure.
       if(Update.hasError()) {
         StreamString str;
         Update.printError(str);
+        Update.clearError();
         debug_puts(str.c_str());
       }
     };
