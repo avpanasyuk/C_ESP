@@ -40,15 +40,25 @@ namespace avp {
      * @param DoTimeMarks_ prefix each new entry with GetTimestamp() (when set)
      * @param size buffer capacity in bytes, excluding the trailing '\0'
      * @param Break separator appended after entries (HTML line break)
+     * @note Only a change of @p size discards the existing log; calling begin() again
+     *       with the same size keeps it.
      */
     static void begin(bool DoTimeMarks_ = true, int size = DefaultSize, const char *Break = "<br>") {
       // should set all this stuff before assigning Text value
       Br = Break;
       BrL = strlen(Break);
       DoTimeMarks = DoTimeMarks_;
-      if(Sz != size) Text = (char *)realloc(Text, (Sz = size) + 1); // for trailing zero
-      if(Text == nullptr) abort();
-      else Text[0] = 0;
+      // Clearing is tied to the (re)allocation, not to the call: realloc leaves the new
+      // tail uninitialized and a shrink can cut the terminator off, so a resized buffer
+      // has to start empty -- but begin() runs twice on the way up, once from
+      // StaticWebServer::begin and once from the project, and clearing on the second
+      // discarded everything the WiFi bring-up had already logged.
+      if(Sz != size || Text == nullptr) {
+        Text = (char *)realloc(Text, (Sz = size) + 1); // for trailing zero
+        if(Text == nullptr) abort();
+        Text[0] = 0;
+        LastMsgLen = 0; // dedup would compare against bytes no longer in the buffer
+      }
     } // begin
 
     /// @return the whole log as a NUL-terminated C string (allocates on first use).

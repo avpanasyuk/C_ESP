@@ -44,6 +44,7 @@ namespace avp {
     struct HTTP {
       enum class Response_t : int {
         OK = 200,
+        BAD_REQUEST = 400,
         NOT_FOUND = 404,
         INTERNAL_SERVER_ERROR = 500,
         REDIRECT = 303
@@ -113,7 +114,7 @@ namespace avp {
 
     static void begin(const Options_t &Opts = DefaultOpts()) {
       Options = Opts;
-      HTML_Log::begin(Options.LogSize);
+      HTML_Log::begin(true, Options.LogSize); // leading arg is DoTimeMarks, not the size
       HTTP_POST_error_sink = +[](const char *s) { HTML_Log::Add(s, true); }; // report failures to /log
       StaticWiFi_Conn::begin(Opts);
 
@@ -143,7 +144,7 @@ namespace avp {
         send("text/html", Resp);
       });
 
-      on("/config", []() { // URL xxx.xxx.xxx.xxx/set?pin=14&value=1
+      on("/config", []() { // URL xxx.xxx.xxx.xxx/config?ssid=......&pass=......
         String qsid = s.arg("ssid");
         String qpass = s.arg("pass");
         if(qsid.length() > 0 && qpass.length() > 0) {
@@ -156,7 +157,12 @@ namespace avp {
             WiFi.waitForConnectResult() == WL_CONNECTED) StoreAUTH(qsid.c_str(), qpass.c_str());
           // delay(1000); server is still running, no point to reset
           // ESP.restart();
-        }
+        } else
+          // Answering matters more than it looks: this handler matched, so the server
+          // will not fall through to its 404, and a handler that sends nothing leaves
+          // the caller waiting out HTTP_MAX_CLOSE_WAIT for an empty reply.
+          send("text/plain", "Both ssid= and pass= are required, and neither may be empty",
+            HTTP::Response_t::BAD_REQUEST);
       });
 
       on("/pin", []() { // URL xxx.xxx.xxx.xxx/pin?i=n[&analog][&set=x][&mode=x]
