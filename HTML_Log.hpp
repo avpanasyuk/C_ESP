@@ -48,11 +48,11 @@ namespace avp {
       Br = Break;
       BrL = strlen(Break);
       DoTimeMarks = DoTimeMarks_;
-      // Clearing is tied to the (re)allocation, not to the call: realloc leaves the new
-      // tail uninitialized and a shrink can cut the terminator off, so a resized buffer
-      // has to start empty -- but begin() runs twice on the way up, once from
-      // StaticWebServer::begin and once from the project, and clearing on the second
-      // discarded everything the WiFi bring-up had already logged.
+      // Clearing is tied to the (re)allocation, not to the call: realloc leaves the new tail
+      // uninitialized and a shrink can cut the terminator off, so a resized buffer has to
+      // start empty. A same-size call keeps its contents, because begin() can run more than
+      // once on the way up -- StaticWebServer::begin() calls it, and a project may call it
+      // again -- and an unconditional clear there throws away the WiFi bring-up trace.
       if(Sz != size || Text == nullptr) {
         Text = (char *)realloc(Text, (Sz = size) + 1); // for trailing zero
         if(Text == nullptr) abort();
