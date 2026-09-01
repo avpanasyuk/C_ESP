@@ -213,8 +213,11 @@ class ESPDataHandler(BaseHTTPRequestHandler):
         # truncate to whole seconds (HTTP date precision)
         file_mtime = file_mtime.replace(microsecond=0)
 
-        device_version = (self.headers.get('x-ESP8266-version')
-                          or self.headers.get('x-ESP32-version', '?'))
+        # The raw header doubles as proof the client IS an ESP, so keep it separate from the
+        # '?' used for display -- see the pull-recording guard below.
+        version_hdr = (self.headers.get('x-ESP8266-version')
+                       or self.headers.get('x-ESP32-version'))
+        device_version = version_hdr or '?'
 
         name = path.stem          # "<NAME>.bin" -> "<NAME>" (matches the watchdog)
         file_md5 = hashlib.md5(path.read_bytes()).hexdigest()
@@ -268,17 +271,28 @@ class ESPDataHandler(BaseHTTPRequestHandler):
 
         # Fleet OTA: record that this device is about to flash file_md5, so the watchdog can
         # tell a deployed-and-pulled image (must confirm) from one no device has fetched yet
-        # (leave alone). Device id = its STA MAC (stable), else chip id / version.
+        # (leave alone). Device id = its STA MAC (stable), else chip id / sketch md5 / version.
+        #
+        # ONLY a client that identifies itself as an ESP starts the confirm clock. A bare curl
+        # or browser GET is a human checking the route, not a deployment -- recording it as a
+        # pull makes the watchdog revert AND blacklist a healthy image once CONFIRM_WINDOW_S
+        # expires, and a blacklisted md5 is answered 304 forever, so re-dropping the same bytes
+        # silently never deploys. Serving the bytes to anyone is fine; only the pull record is.
         if self.ota is not None and fleet_ota is not None:
-            try:
-                device = (self.headers.get('x-ESP8266-STA-MAC')
-                          or self.headers.get('x-ESP32-STA-MAC')
-                          or self.headers.get('x-ESP8266-Chip-ID')
-                          or f"fw={device_version}")
-                self.ota.record_pull(name, file_md5, device)
-                print(f"  [ota] pull {name} md5={file_md5[:8]} by {device}")
-            except Exception as e:
-                print(f"  [ota] pull recording failed: {e}")
+            device = (self.headers.get('x-ESP8266-STA-MAC')
+                      or self.headers.get('x-ESP32-STA-MAC')
+                      or self.headers.get('x-ESP8266-Chip-ID')
+                      or self.headers.get('x-ESP32-Chip-ID')
+                      or (f"md5={device_md5[:8]}" if device_md5 else None)
+                      or (f"fw={version_hdr}" if version_hdr else None))
+            if device is None:
+                print("  [ota] anonymous GET (no ESP headers) -- not recorded as a pull")
+            else:
+                try:
+                    self.ota.record_pull(name, file_md5, device)
+                    print(f"  [ota] pull {name} md5={file_md5[:8]} by {device}")
+                except Exception as e:
+                    print(f"  [ota] pull recording failed: {e}")
 
         self.send_response(200)
         self.send_header('Content-Type', 'application/octet-stream')

@@ -25,7 +25,9 @@ to the one place that can protect the WHOLE fleet: the single distribution point
     md5 is bad -- the puller bricked/crashed/browned-out. The watchdog reverts to .good and
     blacklists the bad md5. The "was pulled" gate makes a false revert essentially
     impossible: an image no device fetched is never touched, so a good deploy waiting on
-    sleeping devices is safe.
+    sleeping devices is safe. That gate only holds because http_server.py counts a GET as a
+    pull ONLY from a client presenting an ESP header -- a bare curl of the firmware URL used
+    to start the clock and got a healthy image reverted and blacklisted.
 
   * blacklist: a bad md5 is refused by the server (served as 304 "no update") so a re-drop
     of the same bytes cannot re-poison the fleet.
@@ -152,7 +154,11 @@ class FleetOTA:
     # -- server-side event recording -------------------------------------------------
 
     def record_pull(self, name, md5, device, now=None):
-        """A device fetched <NAME>.bin (200). Note it so a bad image can be attributed."""
+        """An ESP fetched <NAME>.bin (200). Note it so a bad image can be attributed.
+
+        Caller must have established that `device` is a real ESP: this starts the
+        CONFIRM_WINDOW_S clock whose expiry reverts and blacklists the image.
+        """
         now = now or time.time()
         with self._lock():
             st = self._load()
