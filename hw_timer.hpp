@@ -6,7 +6,11 @@
 #include <soc/soc_caps.h>
 #include <driver/timer.h>
 #define NUM_HW_TIMERS SOC_TIMER_GROUP_TOTAL_TIMERS
-#define DEFAULT_TIMER 2 // avoid timer 0 and 1, used by RTOS and WiFi
+// Prefer timer 2, to stay clear of 0 and 1 (RTOS and WiFi). The original ESP32/S2/S3 have
+// four, but the C3/C2/H2 have only two, where a hard-coded 2 is out of range and trips the
+// static_assert below. Falling back to the highest valid index keeps every existing target
+// on exactly the timer it used before.
+#define DEFAULT_TIMER (NUM_HW_TIMERS > 2 ? 2 : NUM_HW_TIMERS - 1)
 #endif
 #ifdef ESP8266
 #define NUM_HW_TIMERS 1
