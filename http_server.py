@@ -33,7 +33,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -66,12 +68,120 @@ def send_mail(recipient, subject, body, mail_bin="mail"):
     )
 
 
+# Rotation/rate state. Requests run on their own threads (ThreadingHTTPServer), so the
+# append-then-maybe-rotate sequence needs a lock per file: without one, two concurrent
+# POSTs can both see an over-size file and rotate it twice, stranding a one-row chunk.
+_locks_meta = threading.Lock()
+_locks = {}
+_rate_lock = threading.Lock()
+_rate_windows = {}      # filename -> deque of monotonic arrival times, trimmed to 60 s
+_alerts_sent = set()    # alert keys already emailed; issue-only, never a heartbeat
+_dir_checked_at = [0.0]
+
+
+def _lock_for(path):
+    key = str(path)
+    with _locks_meta:
+        lock = _locks.get(key)
+        if lock is None:
+            lock = _locks[key] = threading.Lock()
+    return lock
+
+
+def rotate_log(csv_path, when):
+    """Rename `csv_path` aside so a fresh file starts, and return the new path.
+
+    NON-DESTRUCTIVE by construction: the suffix is a timestamp, so a rotation can never
+    land on an existing file (and a second rotation inside the same second still gets a
+    counter). Readers reassemble a series by reading `<name>` together with its
+    `<name>.<stamp>` siblings, which sort chronologically as plain strings.
+
+    An earlier scheme reused a single `.1` and let `Path.replace` overwrite it, which
+    silently destroyed every chunk but the last two -- about two thirds of several
+    months of meter data, while returning 200 to the device and logging nothing lost.
+    """
+    stamp = when.strftime('%Y%m%d-%H%M%S')
+    target = Path(f"{csv_path}.{stamp}")
+    n = 0
+    while target.exists():
+        n += 1
+        target = Path(f"{csv_path}.{stamp}-{n}")
+    csv_path.replace(target)
+    return target
+
+
+def alert_once(key, subject, body, recipient, mail_bin):
+    """Email `recipient` the first time `key` fires; repeats are silent until restart.
+
+    Never raises into the request path -- an unreachable MTA must not cost a log row.
+    """
+    if not recipient or key in _alerts_sent:
+        return
+    _alerts_sent.add(key)
+    try:
+        send_mail(recipient, subject, body, mail_bin=mail_bin)
+    except Exception as e:                                # noqa: BLE001 - never fatal
+        print(f"  alert email failed: {e}")
+
+
+def rate_ok(filename, limit):
+    """True if `filename` is under `limit` rows/minute. 0/None disables the limit.
+
+    This, not the size cap, is the real guard against a device filling the disk: a
+    runaway is a RATE anomaly. A device on a sane cadence posts a few rows a minute and
+    cannot reach the limit, so nothing legitimate is ever dropped.
+    """
+    if not limit:
+        return True
+    now = time.monotonic()
+    with _rate_lock:
+        window = _rate_windows.setdefault(filename, deque())
+        while window and now - window[0] > 60.0:
+            window.popleft()
+        if len(window) >= limit:
+            return False
+        window.append(now)
+        return True
+
+
+def check_dir_quota(log_dir, quota, recipient, mail_bin):
+    """Backstop: alert once if the log dir passes `quota` bytes. Never deletes anything.
+
+    Rescanned at most every 5 minutes -- stat'ing every file on each POST would make the
+    sink's per-row cost grow with its own history.
+    """
+    if not quota:
+        return
+    now = time.monotonic()
+    if now - _dir_checked_at[0] < 300.0:
+        return
+    _dir_checked_at[0] = now
+    try:
+        total = sum(e.stat().st_size for e in os.scandir(log_dir) if e.is_file())
+    except OSError:
+        return
+    if total > quota:
+        alert_once('dir-quota', f"log sink over quota ({total} bytes)",
+                   f"{log_dir} holds {total} bytes, past the {quota}-byte threshold.\n"
+                   "Nothing has been deleted. Free space or raise --dir-quota-bytes.",
+                   recipient, mail_bin)
+
+
 class ESPDataHandler(BaseHTTPRequestHandler):
     log_dir = None
     firmware_dir = None
     ota = None            # fleet_ota.FleetOTA instance, or None (OTA-safety disabled)
     mail_bin = "mail"
-    max_log_bytes = 10 * 1024 * 1024   # rotate a log file to .1 once it grows past this
+    # Past this size a log is renamed aside with a timestamp suffix and a fresh one
+    # starts. This bounds a single FILE, not the series -- nothing is ever discarded.
+    max_log_bytes = 10 * 1024 * 1024
+    # Rows/minute accepted per filename; excess is dropped with a 429 and one alert.
+    # This is what actually bounds disk use. 0 disables.
+    max_rows_per_min = 120
+    # Alert once if the log dir passes this many bytes. Never deletes. 0 disables.
+    dir_quota_bytes = 0
+    # Where rate-limit and quota alerts go. None disables alerting (they still print).
+    alert_email = None
     # -v: echo each accepted POST. Off by default -- the row is already stored
     # verbatim (same timestamp) in the CSV under log_dir, so echoing duplicates it.
     verbose = False
@@ -146,16 +256,29 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                 print(f"  Data: {', '.join(csv_data)}")
                 print(f"  Size: {len(data)} bytes")
 
+            if not rate_ok(filename, self.max_rows_per_min):
+                print(f"[{ts_human}] Rate limit: dropped a row for {filename}")
+                alert_once(f"rate:{filename}",
+                           f"log sink dropping rows from {filename}",
+                           f"{filename} passed {self.max_rows_per_min} rows/min at "
+                           f"{ts_human}; excess rows are being dropped so it cannot fill "
+                           f"the disk. A device on a sane cadence cannot reach this rate "
+                           f"-- suspect a crash loop or a stuck retry.",
+                           self.alert_email, self.mail_bin)
+                self._send(429, b'Rate limited')
+                return
+
             try:
                 csv_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(csv_path, 'a') as f:
-                    f.write(','.join([ts_csv] + csv_data) + '\n')
-                # Cap file size so a chatty/looping device can't fill the disk:
-                # past the limit, rotate to <file>.1 (replacing any old .1) and
-                # let a fresh file start. Bounds each log to ~2x max_log_bytes.
-                if csv_path.stat().st_size > self.max_log_bytes:
-                    csv_path.replace(Path(str(csv_path) + '.1'))
-                    print(f"[{ts_human}] Rotated {filename} (> {self.max_log_bytes} bytes)")
+                with _lock_for(csv_path):
+                    with open(csv_path, 'a') as f:
+                        f.write(','.join([ts_csv] + csv_data) + '\n')
+                    if csv_path.stat().st_size > self.max_log_bytes:
+                        target = rotate_log(csv_path, now)
+                        print(f"[{ts_human}] Rotated {filename} -> {target.name} "
+                              f"(> {self.max_log_bytes} bytes)")
+                check_dir_quota(self.log_dir, self.dir_quota_bytes,
+                                self.alert_email, self.mail_bin)
                 if self.verbose:
                     print(f"  Written to: {csv_path.absolute()}")
             except IOError as e:
@@ -346,7 +469,17 @@ GET   /firmware/<name>.bin
     parser.add_argument('--mail-bin', default='mail',
                         help='Path to mail(1) binary used for email-mode POSTs (default: mail)')
     parser.add_argument('--max-log-bytes', type=int, default=10 * 1024 * 1024,
-                        help='Rotate a log file to <file>.1 once it exceeds this size (default: 10 MiB)')
+                        help='Rename a log aside as <file>.<YYYYmmdd-HHMMSS> once it exceeds '
+                             'this size (default: 10 MiB). Nothing is ever deleted.')
+    parser.add_argument('--max-rows-per-min', type=int, default=120,
+                        help='Rows/minute accepted per filename; excess is dropped with a 429 '
+                             'and one alert (default: 120, 0 disables). This is the guard '
+                             'against a crash-looping device filling the disk.')
+    parser.add_argument('--dir-quota-bytes', type=int, default=0,
+                        help='Alert once if the log dir passes this many bytes. Never deletes '
+                             '(default: 0 = off)')
+    parser.add_argument('--alert-email', default=None,
+                        help='Recipient for rate-limit and quota alerts (default: none)')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Echo every accepted POST to stdout. Off by default: the CSV row '
                              'already holds the same data and timestamp, so this only duplicates it.')
@@ -356,6 +489,9 @@ GET   /firmware/<name>.bin
     ESPDataHandler.firmware_dir = args.firmware_dir
     ESPDataHandler.mail_bin = args.mail_bin
     ESPDataHandler.max_log_bytes = args.max_log_bytes
+    ESPDataHandler.max_rows_per_min = args.max_rows_per_min
+    ESPDataHandler.dir_quota_bytes = args.dir_quota_bytes
+    ESPDataHandler.alert_email = args.alert_email
     ESPDataHandler.verbose = args.verbose
 
     if args.firmware_dir and not os.path.isdir(args.firmware_dir):
@@ -379,7 +515,11 @@ GET   /firmware/<name>.bin
     print(f"  log dir:      {args.dir}")
     print(f"  firmware dir: {args.firmware_dir or '(disabled)'}")
     print(f"  mail binary:  {args.mail_bin}")
-    print(f"  max log size: {args.max_log_bytes} bytes (rotate to .1)")
+    print(f"  max log size: {args.max_log_bytes} bytes (rename aside, timestamped)")
+    print(f"  rate limit:   {args.max_rows_per_min or 'off'} rows/min per file")
+    print(f"  dir quota:    {args.dir_quota_bytes or 'off'}"
+          f"{' bytes' if args.dir_quota_bytes else ''}")
+    print(f"  alert email:  {args.alert_email or '(none)'}")
     print("Press Ctrl+C to stop\n")
     try:
         server.serve_forever()
