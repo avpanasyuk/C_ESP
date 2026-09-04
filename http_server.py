@@ -174,7 +174,11 @@ class ESPDataHandler(BaseHTTPRequestHandler):
     mail_bin = "mail"
     # Past this size a log is renamed aside with a timestamp suffix and a fresh one
     # starts. This bounds a single FILE, not the series -- nothing is ever discarded.
-    max_log_bytes = 10 * 1024 * 1024
+    # 0 (the default) disables rotation: a device that puts the month in its filename
+    # already gets one bounded file per month, and splitting that into chunks buys
+    # nothing while giving every reader a chance to see only part of a month.
+    # max_rows_per_min below is what actually protects the disk.
+    max_log_bytes = 0
     # Rows/minute accepted per filename; excess is dropped with a 429 and one alert.
     # This is what actually bounds disk use. 0 disables.
     max_rows_per_min = 120
@@ -273,7 +277,7 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                 with _lock_for(csv_path):
                     with open(csv_path, 'a') as f:
                         f.write(','.join([ts_csv] + csv_data) + '\n')
-                    if csv_path.stat().st_size > self.max_log_bytes:
+                    if self.max_log_bytes and csv_path.stat().st_size > self.max_log_bytes:
                         target = rotate_log(csv_path, now)
                         print(f"[{ts_human}] Rotated {filename} -> {target.name} "
                               f"(> {self.max_log_bytes} bytes)")
@@ -468,9 +472,11 @@ GET   /firmware/<name>.bin
                         help='Directory where firmware .bin files live; omit to disable GET /firmware/')
     parser.add_argument('--mail-bin', default='mail',
                         help='Path to mail(1) binary used for email-mode POSTs (default: mail)')
-    parser.add_argument('--max-log-bytes', type=int, default=10 * 1024 * 1024,
+    parser.add_argument('--max-log-bytes', type=int, default=0,
                         help='Rename a log aside as <file>.<YYYYmmdd-HHMMSS> once it exceeds '
-                             'this size (default: 10 MiB). Nothing is ever deleted.')
+                             'this size; nothing is ever deleted. Default 0 = never rotate, '
+                             'which is what you want for logs whose filename already carries '
+                             'the month. Use --max-rows-per-min to bound disk use.')
     parser.add_argument('--max-rows-per-min', type=int, default=120,
                         help='Rows/minute accepted per filename; excess is dropped with a 429 '
                              'and one alert (default: 120, 0 disables). This is the guard '
@@ -515,7 +521,8 @@ GET   /firmware/<name>.bin
     print(f"  log dir:      {args.dir}")
     print(f"  firmware dir: {args.firmware_dir or '(disabled)'}")
     print(f"  mail binary:  {args.mail_bin}")
-    print(f"  max log size: {args.max_log_bytes} bytes (rename aside, timestamped)")
+    print(f"  max log size: {str(args.max_log_bytes) + ' bytes (rename aside, timestamped)'
+                             if args.max_log_bytes else 'unlimited (no rotation)'}")
     print(f"  rate limit:   {args.max_rows_per_min or 'off'} rows/min per file")
     print(f"  dir quota:    {args.dir_quota_bytes or 'off'}"
           f"{' bytes' if args.dir_quota_bytes else ''}")
