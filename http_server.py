@@ -68,6 +68,15 @@ def send_mail(recipient, subject, body, mail_bin="mail"):
     )
 
 
+# A log whose filename already carries the month has a natural boundary: the device
+# starts a fresh file on the 1st, so the file is bounded by the month and size-rotating
+# it only splits one month across several files -- which hands every reader a chance to
+# see part of a month and believe it saw all of it. Such names are exempt from the size
+# cap; logs without a month in the name (EVR_Balance.log, IrrCntrl.csv, Debug_log.csv)
+# grow without bound and keep it. Matches a ".MM.YY." group, '.', '_' or '-' separated,
+# e.g. PowerMonitor.v0.09.26.main.csv.
+MONTHLY_NAME_RE = re.compile(r'(?:^|[._-])(?:0[1-9]|1[0-2])[._-]\d{2}(?:[._-]|$)')
+
 # Rotation/rate state. Requests run on their own threads (ThreadingHTTPServer), so the
 # append-then-maybe-rotate sequence needs a lock per file: without one, two concurrent
 # POSTs can both see an over-size file and rotate it twice, stranding a one-row chunk.
@@ -174,11 +183,12 @@ class ESPDataHandler(BaseHTTPRequestHandler):
     mail_bin = "mail"
     # Past this size a log is renamed aside with a timestamp suffix and a fresh one
     # starts. This bounds a single FILE, not the series -- nothing is ever discarded.
-    # 0 (the default) disables rotation: a device that puts the month in its filename
-    # already gets one bounded file per month, and splitting that into chunks buys
-    # nothing while giving every reader a chance to see only part of a month.
-    # max_rows_per_min below is what actually protects the disk.
-    max_log_bytes = 0
+    # 0 disables rotation entirely.
+    max_log_bytes = 10 * 1024 * 1024
+    # Filenames matching this are never size-rotated whatever max_log_bytes says,
+    # because the name already carries the month (see MONTHLY_NAME_RE). None makes
+    # every file obey max_log_bytes.
+    no_rotate_re = MONTHLY_NAME_RE
     # Rows/minute accepted per filename; excess is dropped with a 429 and one alert.
     # This is what actually bounds disk use. 0 disables.
     max_rows_per_min = 120
@@ -277,7 +287,9 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                 with _lock_for(csv_path):
                     with open(csv_path, 'a') as f:
                         f.write(','.join([ts_csv] + csv_data) + '\n')
-                    if self.max_log_bytes and csv_path.stat().st_size > self.max_log_bytes:
+                    exempt = self.no_rotate_re is not None and self.no_rotate_re.search(filename)
+                    if self.max_log_bytes and not exempt \
+                            and csv_path.stat().st_size > self.max_log_bytes:
                         target = rotate_log(csv_path, now)
                         print(f"[{ts_human}] Rotated {filename} -> {target.name} "
                               f"(> {self.max_log_bytes} bytes)")
@@ -472,11 +484,15 @@ GET   /firmware/<name>.bin
                         help='Directory where firmware .bin files live; omit to disable GET /firmware/')
     parser.add_argument('--mail-bin', default='mail',
                         help='Path to mail(1) binary used for email-mode POSTs (default: mail)')
-    parser.add_argument('--max-log-bytes', type=int, default=0,
+    parser.add_argument('--max-log-bytes', type=int, default=10 * 1024 * 1024,
                         help='Rename a log aside as <file>.<YYYYmmdd-HHMMSS> once it exceeds '
-                             'this size; nothing is ever deleted. Default 0 = never rotate, '
-                             'which is what you want for logs whose filename already carries '
-                             'the month. Use --max-rows-per-min to bound disk use.')
+                             'this size (default: 10 MiB, 0 disables). Nothing is ever deleted. '
+                             'Does not apply to names matching --no-rotate-pattern.')
+    parser.add_argument('--no-rotate-pattern', default=MONTHLY_NAME_RE.pattern,
+                        help='Regex on the posted filename; a match is never size-rotated, '
+                             'because a name carrying the month already has a natural boundary '
+                             'and splitting it hides part of a month from readers. Empty string '
+                             'exempts nothing.')
     parser.add_argument('--max-rows-per-min', type=int, default=120,
                         help='Rows/minute accepted per filename; excess is dropped with a 429 '
                              'and one alert (default: 120, 0 disables). This is the guard '
@@ -495,6 +511,11 @@ GET   /firmware/<name>.bin
     ESPDataHandler.firmware_dir = args.firmware_dir
     ESPDataHandler.mail_bin = args.mail_bin
     ESPDataHandler.max_log_bytes = args.max_log_bytes
+    try:
+        ESPDataHandler.no_rotate_re = re.compile(args.no_rotate_pattern) \
+            if args.no_rotate_pattern else None
+    except re.error as e:
+        parser.error(f"--no-rotate-pattern is not a valid regex: {e}")
     ESPDataHandler.max_rows_per_min = args.max_rows_per_min
     ESPDataHandler.dir_quota_bytes = args.dir_quota_bytes
     ESPDataHandler.alert_email = args.alert_email
@@ -523,6 +544,7 @@ GET   /firmware/<name>.bin
     print(f"  mail binary:  {args.mail_bin}")
     print(f"  max log size: {str(args.max_log_bytes) + ' bytes (rename aside, timestamped)'
                              if args.max_log_bytes else 'unlimited (no rotation)'}")
+    print(f"  never rotate: {args.no_rotate_pattern or '(nothing exempt)'}")
     print(f"  rate limit:   {args.max_rows_per_min or 'off'} rows/min per file")
     print(f"  dir quota:    {args.dir_quota_bytes or 'off'}"
           f"{' bytes' if args.dir_quota_bytes else ''}")
