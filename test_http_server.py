@@ -176,8 +176,10 @@ srv, port = serve(hs.ESPDataHandler)
 jpeg = bytes([0xFF, 0xD8, 0xFF, 0xE0]) + bytes(range(256)) * 40 + bytes([0xFF, 0xD9])  # binary, not UTF-8
 codes = {post_image(port, "SleepCam-31E494", jpeg + bytes([i])) for i in range(3)}  # same second
 bad_name = post_image(port, "..%2Fetc", jpeg)
+raw_traversal = post_image(port, "../../etc", jpeg)   # literal slashes, no encoding
 too_big = post_image(port, "SleepCam-31E494", bytes(200 * 1024))
 empty = post_image(port, "SleepCam-31E494", b"")
+not_jpeg = post_image(port, "SleepCam-31E494", b"PK\x03\x04" + bytes(4096))
 srv.shutdown()
 
 dev_dir = tmp / "images" / "SleepCam-31E494"
@@ -188,16 +190,29 @@ check("bodies stored verbatim",
       sorted(p.read_bytes() for p in files) == sorted(jpeg + bytes([i]) for i in range(3)))
 check("names are second-stamped .jpg", all(p.suffix == ".jpg" and len(p.stem) >= 19 for p in files))
 check("traversal-shaped device rejected", bad_name == 400, f"code={bad_name}")
+check("raw ../ path rejected", raw_traversal == 400, f"code={raw_traversal}")
 check("oversize rejected", too_big == 413, f"code={too_big}")
 check("empty rejected", empty == 413, f"code={empty}")
+check("non-JPEG body rejected", not_jpeg == 415, f"code={not_jpeg}")
 check("nothing landed outside the device dir",
       sorted(p.name for p in (tmp / "images").iterdir()) == ["SleepCam-31E494"])
+check("still exactly three files", len(sorted(dev_dir.iterdir())) == 3)
 
 hs.ESPDataHandler.image_dir = None
 srv, port = serve(hs.ESPDataHandler)
 disabled = post_image(port, "SleepCam-31E494", jpeg)
 srv.shutdown()
 check("route disabled without an image dir", disabled == 404, f"code={disabled}")
+
+# ---------------------------------------------------------------- write failure is reported
+print("\n[8] a row the sink could not write is answered 500, not 200")
+blocked = tmp / "blocked.csv"
+blocked.mkdir()                       # a directory where the file should be: open() raises
+hs.ESPDataHandler.max_rows_per_min = 0
+srv, port = serve(hs.ESPDataHandler)
+code = post(port, "blocked.csv,1,2")
+srv.shutdown()
+check("unwritable row -> 500", code == 500, f"code={code}")
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(f"\n{'ALL PASS' if not failures else 'FAILURES: ' + ', '.join(failures)}")

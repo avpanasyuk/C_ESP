@@ -154,6 +154,10 @@ def rate_ok(filename, limit):
         return True
     now = time.monotonic()
     with _rate_lock:
+        # Drop keys whose window has emptied, or a long-lived sink accumulates one deque per
+        # filename it has ever seen (rotated names, retired devices, image device dirs).
+        for key in [k for k, w in _rate_windows.items() if k != filename and w and now - w[-1] > 60.0]:
+            del _rate_windows[key]
         window = _rate_windows.setdefault(filename, deque())
         while window and now - window[0] > 60.0:
             window.popleft()
@@ -176,7 +180,9 @@ def check_dir_quota(log_dir, quota, recipient, mail_bin):
         return
     _dir_checked_at[0] = now
     try:
-        total = sum(e.stat().st_size for e in os.scandir(log_dir) if e.is_file())
+        # Recursive: the image subdirs are the traffic most likely to fill the disk.
+        total = sum(os.path.getsize(os.path.join(root, f))
+                    for root, _, files in os.walk(log_dir) for f in files)
     except OSError:
         return
     if total > quota:
@@ -316,7 +322,11 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                 if self.verbose:
                     print(f"  Written to: {csv_path.absolute()}")
             except IOError as e:
+                # Tell the device: a 200 here would make a full disk look like a healthy sink,
+                # and a row it believes it posted (its battery reading, its BOOT confirm) is gone.
                 print(f"[{ts_human}] Error writing CSV {csv_path}: {e}")
+                self._send(500, b'Write failed')
+                return
 
             # Fleet OTA confirm: a device's BOOT row carries "md5=<hex>" (its running image)
             # and, in the FleetServerDebug format "<file>,<name>,<line>", csv_data[0] is the
@@ -365,21 +375,31 @@ class ESPDataHandler(BaseHTTPRequestHandler):
                 self.rfile.read(content_length)
             self._send(413, b'Image size out of range')
             return
-        # Rate-limited under its own key so a camera in a wake loop cannot fill the disk,
-        # and so it never eats the row budget of the device's CSV log.
-        if not rate_ok(f"image/{device}", self.max_rows_per_min):
+        # Rate-limited under the device's own key so a camera in a wake loop cannot fill the
+        # disk without touching its CSV row budget -- and under one global key, because a
+        # per-device window is bypassed by rotating the device name.
+        if not rate_ok(f"image/{device}", self.max_rows_per_min) \
+                or not rate_ok("image/*", self.max_rows_per_min):
             print(f"[{ts_human}] Rate limit: dropped an image from {device}")
             alert_once(f"rate:image/{device}",
                        f"log sink dropping images from {device}",
                        f"{device} passed {self.max_rows_per_min} images/min at {ts_human}; "
                        f"excess images are being dropped. Suspect a wake loop.",
                        self.alert_email, self.mail_bin)
+            if content_length <= 4 * self.max_image_bytes:
+                self.rfile.read(content_length) # drain, so the client reads the 429 (see 413 above)
             self._send(429, b'Rate limited')
             return
         body = self.rfile.read(content_length)
         if len(body) != content_length:
             print(f"[{ts_human}] Short image body from {device}: {len(body)}/{content_length}")
             self._send(400, b'Short body')
+            return
+        if body[:2] != b'\xff\xd8':
+            # Only JPEGs are stored: the SOI marker is the cheapest test that the body is one,
+            # and it turns the route from "any blob into a fresh directory" into a camera sink.
+            print(f"[{ts_human}] Rejected non-JPEG body from {device} ({len(body)} bytes)")
+            self._send(415, b'Not a JPEG')
             return
         # Second-resolution stamp plus a counter, same non-destructive rule as rotate_log:
         # a name is never reused, so a burst within one second cannot overwrite a frame.

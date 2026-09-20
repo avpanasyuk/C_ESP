@@ -52,6 +52,10 @@ namespace avp {
     static inline const char *LogFile = "Debug_log.csv";
 
    public:
+    /// Result of the most recent ship(): true iff the server answered 200. A deep-sleeper whose
+    /// BOOT row is the fleet-OTA confirm reads this after LogBoot() and re-posts on false, since
+    /// a lost confirm gets a healthy image reverted and blacklisted server-side.
+    static inline bool LastShipOK = false;
     /// @param url     fleet server root, e.g. "http://bsd:8000/"
     /// @param name    device name placed in the first data column
     /// @param logfile CSV the lines are appended to (default "Debug_log.csv")
@@ -78,11 +82,14 @@ namespace avp {
       Len = 0;
       if(n == 0) return;
       Line[n] = '\0';
-      if(WiFi.status() != WL_CONNECTED) return; // only post while connected
+      if(WiFi.status() != WL_CONNECTED) { // only post while connected
+        LastShipOK = false;
+        return;
+      }
       Busy = true;
       char body[MaxLine + 64];
       snprintf(body, sizeof body, "%s,%s,%s", LogFile, Name ? Name : "?", Line);
-      HTTP_POST_puts(URL, body); // result unused; it reports failures via its own sink, not here
+      LastShipOK = HTTP_POST_puts(URL, body); // it reports failures via its own sink, not here
       Busy = false;
     }
   }; // class FleetServerDebug
