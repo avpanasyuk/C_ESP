@@ -5,7 +5,7 @@
  * A device is battery-monitored by declaring its chemistry ONCE in the project (all
  * same-named devices share a battery type), e.g.
  *
- *     static constexpr avp::Battery kBattery = avp::Battery::LiFePO4;
+ *     static constexpr avp::Battery kBattery = avp::Battery::LiFePO4Direct;
  *
  * and passing avp::LowVcc_mV(kBattery) as LogBoot()'s vlow argument. The device then
  * self-reports its low-battery threshold in its BOOT line, so the bsd fleet_alarm learns
@@ -25,14 +25,17 @@ namespace avp {
     LiIonLDO,     ///< 1S LiIon behind a 3.3 V LDO; vcc = getVcc reads the regulated RAIL, which
                   ///< only sags once the pack nears LDO dropout (late, coarse -- all getVcc gives)
     LiIonDirect,  ///< 1S LiIon measured directly (ADC divider, reported as ACTUAL pack mV)
+    LiFePO4Direct, ///< 1S LiFePO4 wired straight to the 3.3 V rail, measured directly (ADC divider).
+                   ///< Flat at 3.2-3.3 V for ~90 % of the discharge, then a steep knee near 3.0 V.
   };
 
   /// Low-battery WARN threshold in mV for a sensing topology (0 = not monitored).
   constexpr uint16_t LowVcc_mV(Battery b) {
     switch(b) {
-      case Battery::LiIonLDO:    return 3200; // rail sagging => 1S LiIon near LDO dropout
-      case Battery::LiIonDirect: return 3300; // actual pack at the knee of the discharge curve
-      default:                   return 0;    // None
+      case Battery::LiIonLDO:      return 3200; // rail sagging => 1S LiIon near LDO dropout
+      case Battery::LiIonDirect:   return 3300; // actual pack at the knee of the discharge curve
+      case Battery::LiFePO4Direct: return 3150; // a few % above the ~3.0 V knee: days left at sleep currents
+      default:                     return 0;    // None
     }
   }
 } // namespace avp

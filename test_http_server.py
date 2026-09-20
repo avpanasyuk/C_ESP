@@ -155,6 +155,50 @@ for n in exempt:
 for n in plain:
     check(f"not exempt: {n}", not hs.MONTHLY_NAME_RE.search(n))
 
+# ---------------------------------------------------------------- image upload
+print("\n[7] POST /image/<device> stores each body verbatim, never overwrites, rejects junk")
+
+
+def post_image(port, device, body):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("POST", f"/image/{device}", body=body, headers={"Content-Type": "image/jpeg"})
+    r = c.getresponse()
+    r.read()
+    c.close()
+    return r.status
+
+
+hs.ESPDataHandler.image_dir = str(tmp / "images")
+hs.ESPDataHandler.max_rows_per_min = 0
+hs.ESPDataHandler.max_image_bytes = 100 * 1024
+srv, port = serve(hs.ESPDataHandler)
+
+jpeg = bytes([0xFF, 0xD8, 0xFF, 0xE0]) + bytes(range(256)) * 40 + bytes([0xFF, 0xD9])  # binary, not UTF-8
+codes = {post_image(port, "SleepCam-31E494", jpeg + bytes([i])) for i in range(3)}  # same second
+bad_name = post_image(port, "..%2Fetc", jpeg)
+too_big = post_image(port, "SleepCam-31E494", bytes(200 * 1024))
+empty = post_image(port, "SleepCam-31E494", b"")
+srv.shutdown()
+
+dev_dir = tmp / "images" / "SleepCam-31E494"
+files = sorted(dev_dir.iterdir()) if dev_dir.is_dir() else []
+check("all three accepted", codes == {200}, f"codes={sorted(codes)}")
+check("three distinct files (same-second burst)", len(files) == 3, f"{len(files)} file(s)")
+check("bodies stored verbatim",
+      sorted(p.read_bytes() for p in files) == sorted(jpeg + bytes([i]) for i in range(3)))
+check("names are second-stamped .jpg", all(p.suffix == ".jpg" and len(p.stem) >= 19 for p in files))
+check("traversal-shaped device rejected", bad_name == 400, f"code={bad_name}")
+check("oversize rejected", too_big == 413, f"code={too_big}")
+check("empty rejected", empty == 413, f"code={empty}")
+check("nothing landed outside the device dir",
+      sorted(p.name for p in (tmp / "images").iterdir()) == ["SleepCam-31E494"])
+
+hs.ESPDataHandler.image_dir = None
+srv, port = serve(hs.ESPDataHandler)
+disabled = post_image(port, "SleepCam-31E494", jpeg)
+srv.shutdown()
+check("route disabled without an image dir", disabled == 404, f"code={disabled}")
+
 shutil.rmtree(tmp, ignore_errors=True)
 print(f"\n{'ALL PASS' if not failures else 'FAILURES: ' + ', '.join(failures)}")
 sys.exit(1 if failures else 0)

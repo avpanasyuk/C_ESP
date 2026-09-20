@@ -86,6 +86,13 @@ namespace avp {
     in.crc = ::Crc32((const uint8_t *)&in, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
     fastWakeStore = in;
   }
+  /// Same contract as the ESP8266 overload: a stale cache still associates, so only the
+  /// caller can tell (posts fail) and ask for a full scan + DHCP on the next attempt.
+  inline void InvalidateFastWakeWiFi(uint32_t = 0) {
+    FastWakeWiFi bad{};
+    bad.crc = ~::Crc32((const uint8_t *)&bad, offsetof(FastWakeWiFi, crc), 0xFFFFFFFFu, 0xEDB88320u);
+    fastWakeStore = bad;
+  }
 #endif
 
   /// Capture the current WiFi STA association into `out`. Call after

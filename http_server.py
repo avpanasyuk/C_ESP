@@ -10,6 +10,12 @@ POST  /<anypath>  body: filename-or-email,csv,data,...
                   timestamp prepended: 'YYYY-MM-DD HH:MM:SS.hh' (hundredth-second).
                   Parses directly in Python and MATLAB and converts back to epoch.
 
+POST  /image/<device>  body: one raw JPEG (any binary; Content-Type ignored). Written verbatim
+                  to <image-dir>/<device>/<YYYY-MM-DD_HH-MM-SS>.jpg -- the device is a camera
+                  node that wakes, shoots, POSTs, sleeps, and the server clock is the only
+                  reliable one it has. The row sink is untouched: the CSV log stays line-oriented
+                  and text, the images go beside it. Per-device rate limit as for rows.
+
 GET   /firmware/<name>.bin                       -> serves <firmware-dir>/<name>.bin. Returns
                                                     304 (device skips re-flashing) when the
                                                     device's sketch MD5 matches md5(<name>.bin).
@@ -76,6 +82,10 @@ def send_mail(recipient, subject, body, mail_bin="mail"):
 # grow without bound and keep it. Matches a ".MM.YY." group, '.', '_' or '-' separated,
 # e.g. PowerMonitor.v0.09.26.main.csv.
 MONTHLY_NAME_RE = re.compile(r'(?:^|[._-])(?:0[1-9]|1[0-2])[._-]\d{2}(?:[._-]|$)')
+
+# A device name as it appears in POST /image/<device>: the fleet's "<NAME>-<MAC3>" shape.
+# It becomes a directory name, so nothing that could traverse or hide is allowed through.
+IMAGE_DEVICE_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
 
 # Rotation/rate state. Requests run on their own threads (ThreadingHTTPServer), so the
 # append-then-maybe-rotate sequence needs a lock per file: without one, two concurrent
@@ -194,6 +204,11 @@ class ESPDataHandler(BaseHTTPRequestHandler):
     max_rows_per_min = 120
     # Alert once if the log dir passes this many bytes. Never deletes. 0 disables.
     dir_quota_bytes = 0
+    # Where POST /image/<device> bodies land (one subdir per device). None disables the route.
+    image_dir = None
+    # Largest image body accepted. A camera node posts ~30-300 KB; anything past this is not
+    # a photo, and the read is bounded so a lying Content-Length cannot pin a worker.
+    max_image_bytes = 4 * 1024 * 1024
     # Where rate-limit and quota alerts go. None disables alerting (they still print).
     alert_email = None
     # -v: echo each accepted POST. Off by default -- the row is already stored
@@ -208,6 +223,9 @@ class ESPDataHandler(BaseHTTPRequestHandler):
     # -- POST: data logging or email ---------------------------------------------------
 
     def do_POST(self):
+        if self.path.startswith('/image/'):
+            self._post_image()
+            return
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length)
@@ -321,6 +339,68 @@ class ESPDataHandler(BaseHTTPRequestHandler):
         except Exception as e:
             print(f"Error processing POST: {e}")
             self._send(500, b'Error')
+
+    # -- POST /image/<device>: one raw JPEG per request -----------------------------------
+
+    def _post_image(self):
+        ts_human = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        if self.image_dir is None:
+            self._send(404, b'Images disabled')
+            return
+        device = self.path[len('/image/'):]
+        if not IMAGE_DEVICE_RE.match(device):
+            print(f"[{ts_human}] Rejected image device name: {device!r}")
+            self._send(400, b'Bad device name')
+            return
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+        except ValueError:
+            self._send(400, b'Bad Content-Length')
+            return
+        if content_length <= 0 or content_length > self.max_image_bytes:
+            print(f"[{ts_human}] Rejected image from {device}: {content_length} bytes")
+            # Drain a merely-too-large body so the client reads a 413 instead of a reset
+            # (closing with unread data RSTs the peer mid-send); an absurd length is dropped.
+            if 0 < content_length <= 4 * self.max_image_bytes:
+                self.rfile.read(content_length)
+            self._send(413, b'Image size out of range')
+            return
+        # Rate-limited under its own key so a camera in a wake loop cannot fill the disk,
+        # and so it never eats the row budget of the device's CSV log.
+        if not rate_ok(f"image/{device}", self.max_rows_per_min):
+            print(f"[{ts_human}] Rate limit: dropped an image from {device}")
+            alert_once(f"rate:image/{device}",
+                       f"log sink dropping images from {device}",
+                       f"{device} passed {self.max_rows_per_min} images/min at {ts_human}; "
+                       f"excess images are being dropped. Suspect a wake loop.",
+                       self.alert_email, self.mail_bin)
+            self._send(429, b'Rate limited')
+            return
+        body = self.rfile.read(content_length)
+        if len(body) != content_length:
+            print(f"[{ts_human}] Short image body from {device}: {len(body)}/{content_length}")
+            self._send(400, b'Short body')
+            return
+        # Second-resolution stamp plus a counter, same non-destructive rule as rotate_log:
+        # a name is never reused, so a burst within one second cannot overwrite a frame.
+        now = datetime.now()
+        dev_dir = Path(self.image_dir) / device
+        target = dev_dir / f"{now.strftime('%Y-%m-%d_%H-%M-%S')}.jpg"
+        try:
+            dev_dir.mkdir(parents=True, exist_ok=True)
+            with _lock_for(dev_dir):
+                n = 0
+                while target.exists():
+                    n += 1
+                    target = dev_dir / f"{now.strftime('%Y-%m-%d_%H-%M-%S')}-{n}.jpg"
+                target.write_bytes(body)
+        except OSError as e:
+            print(f"[{ts_human}] Error writing image {target}: {e}")
+            self._send(500, b'Write failed')
+            return
+        if self.verbose:
+            print(f"[{ts_human}] Image {device}: {len(body)} bytes -> {target}")
+        self._send(200, b'OK')
 
     # -- GET: firmware serving for ESPhttpUpdate ---------------------------------------
 
@@ -471,6 +551,9 @@ POST  body format (email mode): address@host.dom,subject,body...
   body is timestamp + remaining fields (joined by comma).
   Requires `mail(1)` and a working local MTA.
 
+POST  /image/<device>  (raw JPEG body)
+  Writes <image-dir>/<device>/<YYYY-MM-DD_HH-MM-SS>.jpg verbatim.
+
 GET   /firmware/<name>.bin
   Serves <firmware-dir>/<name>.bin; 304 when the device's sketch MD5 (x-ESP8266- or x-ESP32-) already
   matches md5(<name>.bin). Drop a fresh .bin and the next polling device picks it up.
@@ -482,6 +565,9 @@ GET   /firmware/<name>.bin
                         help='Directory where logged CSVs land (default: /mnt/T)')
     parser.add_argument('-F', '--firmware-dir', default=None,
                         help='Directory where firmware .bin files live; omit to disable GET /firmware/')
+    parser.add_argument('-I', '--image-dir', default=None,
+                        help='Directory for POST /image/<device> bodies, one subdir per device '
+                             '(default: <log-dir>/images; "" disables the route)')
     parser.add_argument('--mail-bin', default='mail',
                         help='Path to mail(1) binary used for email-mode POSTs (default: mail)')
     parser.add_argument('--max-log-bytes', type=int, default=10 * 1024 * 1024,
@@ -509,6 +595,8 @@ GET   /firmware/<name>.bin
 
     ESPDataHandler.log_dir = args.dir
     ESPDataHandler.firmware_dir = args.firmware_dir
+    ESPDataHandler.image_dir = (os.path.join(args.dir, 'images') if args.image_dir is None
+                                else (args.image_dir or None))
     ESPDataHandler.mail_bin = args.mail_bin
     ESPDataHandler.max_log_bytes = args.max_log_bytes
     try:
@@ -541,6 +629,7 @@ GET   /firmware/<name>.bin
     print(f"HTTP server listening on http://{args.host}:{args.port}")
     print(f"  log dir:      {args.dir}")
     print(f"  firmware dir: {args.firmware_dir or '(disabled)'}")
+    print(f"  image dir:    {ESPDataHandler.image_dir or '(disabled)'}")
     print(f"  mail binary:  {args.mail_bin}")
     print(f"  max log size: {str(args.max_log_bytes) + ' bytes (rename aside, timestamped)'
                              if args.max_log_bytes else 'unlimited (no rotation)'}")

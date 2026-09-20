@@ -31,7 +31,8 @@
         "WaterLeak-*": 3200,
         "Soil-*": 3200,
         "SoilTH-*": 3200,
-        "Soil32-*": { "threshold": 2900, "scale": 2 }
+        "Soil32-*": { "threshold": 2900, "scale": 2 },
+        "SleepCam-*": 3150
       }
     },
     "stale": {
@@ -41,7 +42,8 @@
       "color": "#b06a00",
       "popup_seconds": 0,
       "devices": {
-        "WaterLeak-*": 1209600
+        "WaterLeak-*": 1209600,
+        "SleepCam-*": 21600
       }
     }
   }
