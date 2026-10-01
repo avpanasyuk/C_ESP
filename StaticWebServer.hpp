@@ -55,6 +55,9 @@ namespace avp {
       const char *Version; ///< version of the board
       String AddUsage;     ///< additional commands in "Usage:" description657
       int LogSize;         ///< size of the log buffer
+      /// When set, the project's own page answers "/" and the usage page moves to "/help" --
+      /// for a device whose front page is its UI rather than this command list.
+      WebServer::THandlerFunction Root;
     } Options;             // Options_t
 
     static const Options_t &DefaultOpts() {
@@ -118,7 +121,8 @@ namespace avp {
       HTTP_POST_error_sink = +[](const char *s) { HTML_Log::Add(s, true); }; // report failures to /log
       StaticWiFi_Conn::begin(Opts);
 
-      on("/", []() {
+      if(Options.Root) on("/", Options.Root);
+      on(Options.Root ? "/help" : "/", []() {
         static String Resp;
         Resp.reserve(200);
         Resp = "<!DOCTYPE HTML>\r\n<html>";
