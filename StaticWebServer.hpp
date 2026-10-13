@@ -157,8 +157,9 @@ namespace avp {
           WiFi.disconnect();
           delay(1000);
           scanNetworks(false, qsid.c_str());
-          if(CheckScanAndTryToConnectToBestAP(qsid.c_str(), qpass.c_str()) && 
-            WiFi.waitForConnectResult() == WL_CONNECTED) StoreAUTH(qsid.c_str(), qpass.c_str());
+          // Bounded: the core's default wait is 60 s, all of it with loop() stalled.
+          if(CheckScanAndTryToConnectToBestAP(qsid.c_str(), qpass.c_str()) &&
+            WiFi.waitForConnectResult(15000) == WL_CONNECTED) StoreAUTH(qsid.c_str(), qpass.c_str());
           // delay(1000); server is still running, no point to reset
           // ESP.restart();
         } else
