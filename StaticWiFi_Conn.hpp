@@ -156,6 +156,15 @@ namespace avp {
     static inline bool OTA_IsInProgress;
     static inline uint32_t OTA_LastActivity_ms;            ///< millis() of last OTA start/progress, for the stall watchdog
     static constexpr uint32_t OTA_StallTimeout_ms = 30000; ///< no OTA progress for this long => assume the upload died
+#if defined(DO_OTA) && DO_OTA
+#ifdef ESP32
+    static inline wifi_ps_type_t SleepBeforeOTA = WIFI_PS_MIN_MODEM;
+    static void RestoreSleepAfterOTA() { WiFi.setSleep(SleepBeforeOTA); }
+#else
+    static inline WiFiSleepType_t SleepBeforeOTA = WIFI_MODEM_SLEEP;
+    static void RestoreSleepAfterOTA() { WiFi.setSleepMode(SleepBeforeOTA); }
+#endif
+#endif
 
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
     static inline bool RollbackPending = false; ///< running image is PENDING_VERIFY: confirm once recoverable, else revert
@@ -268,10 +277,14 @@ namespace avp {
 
       ArduinoOTA.onStart([]() {
         debug_puts(ArduinoOTA.getCommand() == U_FLASH ? "sketch" : "fs");
+        // Restored, not forced back to modem sleep, so a sketch that disabled sleep for
+        // latency keeps it disabled after a failed OTA.
 #ifdef ESP32
+        SleepBeforeOTA = WiFi.getSleep();
         WiFi.setSleep(false); // prevents WiFi from napping
 #endif
 #ifdef ESP8266
+        SleepBeforeOTA = WiFi.getSleepMode();
         WiFi.setSleepMode(WIFI_NONE_SLEEP);
 #endif
         delay(100);
@@ -281,7 +294,7 @@ namespace avp {
         OTA_IsInProgress = true;
       });
       ArduinoOTA.onEnd([]() {
-        WiFi.setSleep(true);
+        RestoreSleepAfterOTA();
         debug_puts("\nEnd");
         OTA_IsInProgress = false;
       });
@@ -291,7 +304,7 @@ namespace avp {
       });
 
       ArduinoOTA.onError([](ota_error_t error) {
-        WiFi.setSleep(true);
+        RestoreSleepAfterOTA();
         debug_printf("Error[%u]: ", error);
         if(error == OTA_AUTH_ERROR) debug_puts("Auth Failed");
         else if(error == OTA_BEGIN_ERROR) debug_puts("Begin Failed");
