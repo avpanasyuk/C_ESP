@@ -3,7 +3,7 @@
 Launched detached (via pythonw) by alarm_listener.py. Renders a centered,
 always-on-top banner on the monitor under the cursor.
 
-    pythonw popup_banner.py "<message>" [bg_hex] [seconds]
+    pythonw popup_banner.py "<message>" [bg_hex] [seconds] [click]
 
 seconds = 0 -> persistent until the user dismisses it (default for alarms).
 
@@ -11,6 +11,9 @@ Dismissal takes a deliberate act -- a click on the banner, or Esc/Enter/Space
 while it holds focus. It deliberately does NOT close on mere mouse movement:
 this carries alarms (water leak, flat battery) that must survive the user
 brushing the mouse without reading them.
+
+"click" -> only a click dismisses it, and it never takes keyboard focus, so
+someone typing when it appears neither closes it nor loses keystrokes to it.
 """
 
 import sys
@@ -66,10 +69,12 @@ def main():
     message = sys.argv[1] if len(sys.argv) > 1 else "Fleet alarm"
     bg = sys.argv[2] if len(sys.argv) > 2 else "#b00020"   # red
     seconds = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0  # 0 = persistent
+    click_only = len(sys.argv) > 4 and sys.argv[4] == "click"
     fg, sub_fg = text_colors(bg)
 
     mx, my, mw, mh = cursor_monitor_geometry()
 
+    prev_fg = _user32.GetForegroundWindow() if click_only and _user32 is not None else None
     root = tk.Tk()
     root.overrideredirect(True)          # no title bar
     root.attributes("-topmost", True)
@@ -92,10 +97,22 @@ def main():
             pass
 
     root.bind("<Button>", close)
-    root.bind("<Escape>", close)
-    root.bind("<Return>", close)
-    root.bind("<space>", close)
-    root.focus_force()                   # so the key bindings reach us
+    if click_only:
+        if _user32 is not None:
+            # A no-activate window still gets its clicks, but not the keyboard focus. Showing it
+            # can still activate it, when Windows lets this process take the foreground (e.g.
+            # after the foreground lock timeout); hand the foreground straight back.
+            root.update()
+            hwnd = _user32.GetParent(root.winfo_id())
+            GWL_EXSTYLE, WS_EX_NOACTIVATE = -20, 0x08000000
+            _user32.SetWindowLongW(hwnd, GWL_EXSTYLE, _user32.GetWindowLongW(hwnd, GWL_EXSTYLE) | WS_EX_NOACTIVATE)
+            if prev_fg and _user32.GetForegroundWindow() == hwnd:
+                _user32.SetForegroundWindow(prev_fg)
+    else:
+        root.bind("<Escape>", close)
+        root.bind("<Return>", close)
+        root.bind("<space>", close)
+        root.focus_force()               # so the key bindings reach us
 
     # Re-assert topmost: a full-screen app (game, video) that grabs the foreground
     # after us would otherwise cover an alarm the user never sees.
