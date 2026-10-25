@@ -510,10 +510,13 @@ namespace avp {
         break;
       case Status_t::SCANNING:
         if(ScanTO.JustCheck() && WiFi.scanComplete() == WIFI_SCAN_RUNNING) { // SCAN_DONE never came
+          // ESP8266 scanDelete() leaves the core's _scanStarted set, so scanComplete() still says
+          // RUNNING next pass: the reset limits this branch to once per ScanTO.
+          ScanTO.Reset();
           debug_puts("WiFi scan timed out\n");
           WiFi.scanDelete();
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
-          else open_AP();
+          if(ConnStatus == Status_t::SCANNING) open_AP(); // no link, or a link with no IP yet
         } else CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
         break;
       case Status_t::TRYING_TO_CONNECT:
