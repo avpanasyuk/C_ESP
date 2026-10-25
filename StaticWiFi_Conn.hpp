@@ -351,9 +351,10 @@ namespace avp {
         debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
       ConnStatus = Status_t::CONNECTED;
       RescanTO.Reset();
-      if(WiFi.getMode() == WIFI_AP_STA) {
-        WiFi.softAPdisconnect(true); // the recovery softAP is no longer needed; the STA link stays
-        debug_puts("SoftAP closed\n");
+      if(WiFi.getMode() == WIFI_AP_STA) { // the recovery softAP is no longer needed
+        bool closed = WiFi.softAPdisconnect(true);
+        debug_printf("SoftAP close %s, STA status %d, IP %s\n", closed ? "ok" : "FAILED", (int)WiFi.status(),
+          WiFi.localIP().toString().c_str());
       }
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
       ConfirmOTAImage(); // back online -> a freshly-flashed image has proven itself
@@ -408,19 +409,24 @@ namespace avp {
       //                      4=CONNECT_FAILED 5=CONNECTION_LOST 6=WRONG_PASSWORD 7=DISCONNECTED.
       // With credentials the station keeps retrying beside the softAP: an AP-only park took a
       // provisioned device off the network for 10 minutes after one failed reconnect.
+      // A failed retry re-enters here every ~30 s; only a new status is logged, so the retries do
+      // not flush the outage evidence out of /log.
+      static int logged_status = -1;
       int sta_status = WiFi.status();
       bool keepSTA = ssid != "";
-      if(WiFi.getMode() != (keepSTA ? WIFI_AP_STA : WIFI_AP)) {
-        WiFi.mode(keepSTA ? WIFI_AP_STA : WIFI_AP);
-        WiFi.softAP(Name, "");
-      }
+      bool entering = WiFi.getMode() != (keepSTA ? WIFI_AP_STA : WIFI_AP);
+      if(entering) WiFi.mode(keepSTA ? WIFI_AP_STA : WIFI_AP);
+      // Unconditional: the mode bit says nothing about whether the AP is actually up, and the
+      // ESP8266 core returns early when the running config already matches.
+      if(!WiFi.softAP(Name, "")) debug_puts("SoftAP start FAILED\n");
       ip = WiFi.softAPIP();
       AP_MODE_ACTIVE_TO.Reset();
       STA_RetryTO.Reset();
       ConnStatus = Status_t::AP_MODE;
-      debug_printf("Waiting for connection in AP mode, IP:%s! (left STA status=%d)\n",
-        (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str(),
-        sta_status);
+      if(entering || sta_status != logged_status)
+        debug_printf("Waiting for connection in AP%s mode, IP:%s! (left STA status=%d)\n", keepSTA ? "+STA" : "",
+          ip.toString().c_str(), sta_status);
+      logged_status = sta_status;
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
       ConfirmOTAImage(); // SoftAP is a valid recovery surface (user can reach /config) -> keep the image
 #endif
@@ -441,13 +447,14 @@ namespace avp {
       Resp += ESP.getFlashChipSize();
       Resp += ", Free Heap (bytes): ";
       Resp += ESP.getFreeHeap();
-      if(WiFi.getMode() == WIFI_MODE_STA) {
+      if(WiFi.status() == WL_CONNECTED) {
         Resp += "<br>Connected to ";
         Resp += WiFi.SSID();
         Resp += " (BSSID: ";
         Resp += BSSIDtoString(WiFi.BSSID());
         Resp += ")";
-      } else Resp += ", (AP mode)";
+      }
+      if(WiFi.getMode() & WIFI_AP) Resp += ", (AP mode)";
       return Resp;
     } // Greeting
 
@@ -490,11 +497,13 @@ namespace avp {
         }
         break;
       case Status_t::AP_MODE:
-        if(WiFi.softAPgetStationNum() > 0) { // a scan would hop channels under the client at /config
-          AP_MODE_ACTIVE_TO.Reset();
-          STA_RetryTO.Reset();
-        }
-        if(ssid != "" ? STA_RetryTO.Expired() : AP_MODE_ACTIVE_TO.Expired()) AsyncStartScanNetworks();
+        if(ssid == "") { // provisioning: stay up while someone is at /config
+          if(WiFi.softAPgetStationNum() > 0) AP_MODE_ACTIVE_TO.Reset();
+          if(AP_MODE_ACTIVE_TO.Expired()) AsyncStartScanNetworks();
+        } else if(STA_RetryTO.JustCheck() && (WiFi.softAPgetStationNum() == 0 || AP_MODE_ACTIVE_TO.JustCheck()))
+          // a scan hops channels under a softAP client, so one attached defers the retry, but only
+          // up to AP_MODE_ACTIVE_TO: a phone left associated must not keep the device off the LAN
+          AsyncStartScanNetworks();
         break;
       case Status_t::SCANNING:
         CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
