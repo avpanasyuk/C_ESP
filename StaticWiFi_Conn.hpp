@@ -192,6 +192,7 @@ namespace avp {
     static inline avp::TimePeriod1<10UL * 1000, millis> ConnectionTO;           // 10 seconds
     static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // 10 minutes, no credentials
     static inline avp::TimePeriod1<30UL * 1000, millis> STA_RetryTO;            // with credentials: retry STA this often
+    static inline avp::TimePeriod1<30UL * 1000, millis> ScanTO;                 // an async scan takes a few seconds
     static inline avp::TimePeriod1<10UL * 60 * 1000, millis> RescanTO;          // time to rescan AP, maybe we can get new connection
     static inline int32_t Channel = 0;
 
@@ -416,16 +417,17 @@ namespace avp {
       bool keepSTA = ssid != "";
       bool entering = WiFi.getMode() != (keepSTA ? WIFI_AP_STA : WIFI_AP);
       if(entering) WiFi.mode(keepSTA ? WIFI_AP_STA : WIFI_AP);
-      // Unconditional: the mode bit says nothing about whether the AP is actually up, and the
-      // ESP8266 core returns early when the running config already matches.
-      if(!WiFi.softAP(Name, "")) debug_puts("SoftAP start FAILED\n");
+      // Unconditional: the mode bit says nothing about whether the AP is actually up. With an
+      // unchanged config the ESP8266 core skips the config write but restarts the softAP DHCP server.
+      bool apUp = WiFi.softAP(Name, "");
+      if(!apUp) debug_puts("SoftAP start FAILED\n");
       ip = WiFi.softAPIP();
       AP_MODE_ACTIVE_TO.Reset();
       STA_RetryTO.Reset();
       ConnStatus = Status_t::AP_MODE;
       if(entering || sta_status != logged_status)
-        debug_printf("Waiting for connection in AP%s mode, IP:%s! (left STA status=%d)\n", keepSTA ? "+STA" : "",
-          ip.toString().c_str(), sta_status);
+        debug_printf("Waiting for connection in AP%s mode, IP:%s%s! (left STA status=%d)\n", keepSTA ? "+STA" : "",
+          ip.toString().c_str(), apUp ? "" : " (softAP down)", sta_status);
       logged_status = sta_status;
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
       ConfirmOTAImage(); // SoftAP is a valid recovery surface (user can reach /config) -> keep the image
@@ -484,6 +486,7 @@ namespace avp {
       ConnStatus = Status_t::SCANNING;
       if(WiFi.getMode() != WIFI_AP_STA) WiFi.mode(WIFI_STA); // keep a recovery softAP up while retrying
       scanNetworks(true);
+      ScanTO.Reset();
     } // AsyncScanNetworks
 
     static void call_in_loop() {
@@ -506,7 +509,12 @@ namespace avp {
           AsyncStartScanNetworks();
         break;
       case Status_t::SCANNING:
-        CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
+        if(ScanTO.JustCheck() && WiFi.scanComplete() == WIFI_SCAN_RUNNING) { // SCAN_DONE never came
+          debug_puts("WiFi scan timed out\n");
+          WiFi.scanDelete();
+          if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
+          else open_AP();
+        } else CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
         break;
       case Status_t::TRYING_TO_CONNECT:
         switch(WiFi.status()) {
