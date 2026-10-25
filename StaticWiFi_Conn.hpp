@@ -190,7 +190,8 @@ namespace avp {
     static inline String ssid, pass;
     static inline status_indication_func_t status_indication_func;
     static inline avp::TimePeriod1<10UL * 1000, millis> ConnectionTO;           // 10 seconds
-    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // 10 minutes
+    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // 10 minutes, no credentials
+    static inline avp::TimePeriod1<30UL * 1000, millis> STA_RetryTO;            // with credentials: retry STA this often
     static inline avp::TimePeriod1<10UL * 60 * 1000, millis> RescanTO;          // time to rescan AP, maybe we can get new connection
     static inline int32_t Channel = 0;
 
@@ -350,6 +351,10 @@ namespace avp {
         debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
       ConnStatus = Status_t::CONNECTED;
       RescanTO.Reset();
+      if(WiFi.getMode() == WIFI_AP_STA) {
+        WiFi.softAPdisconnect(true); // the recovery softAP is no longer needed; the STA link stays
+        debug_puts("SoftAP closed\n");
+      }
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
       ConfirmOTAImage(); // back online -> a freshly-flashed image has proven itself
 #endif
@@ -382,7 +387,7 @@ namespace avp {
             // or current RSSI is fine
             ConfirmConnected();
           } else {
-            WiFi.mode(WIFI_STA);
+            if(WiFi.getMode() != WIFI_AP_STA) WiFi.mode(WIFI_STA);
             WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
             ConnStatus = Status_t::TRYING_TO_CONNECT;
             ConnectionTO.Reset();
@@ -401,11 +406,17 @@ namespace avp {
       // mode, so /log records WHY every fallback happened (not just that it did).
       // ESP8266 wl_status_t: 0=IDLE 1=NO_SSID_AVAIL 2=SCAN_DONE 3=CONNECTED
       //                      4=CONNECT_FAILED 5=CONNECTION_LOST 6=WRONG_PASSWORD 7=DISCONNECTED.
+      // With credentials the station keeps retrying beside the softAP: an AP-only park took a
+      // provisioned device off the network for 10 minutes after one failed reconnect.
       int sta_status = WiFi.status();
-      WiFi.mode(WIFI_AP);
-      WiFi.softAP(Name, "");
+      bool keepSTA = ssid != "";
+      if(WiFi.getMode() != (keepSTA ? WIFI_AP_STA : WIFI_AP)) {
+        WiFi.mode(keepSTA ? WIFI_AP_STA : WIFI_AP);
+        WiFi.softAP(Name, "");
+      }
       ip = WiFi.softAPIP();
       AP_MODE_ACTIVE_TO.Reset();
+      STA_RetryTO.Reset();
       ConnStatus = Status_t::AP_MODE;
       debug_printf("Waiting for connection in AP mode, IP:%s! (left STA status=%d)\n",
         (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str(),
@@ -464,7 +475,7 @@ namespace avp {
 
     static void AsyncStartScanNetworks() {
       ConnStatus = Status_t::SCANNING;
-      WiFi.mode(WIFI_STA);
+      if(WiFi.getMode() != WIFI_AP_STA) WiFi.mode(WIFI_STA); // keep a recovery softAP up while retrying
       scanNetworks(true);
     } // AsyncScanNetworks
 
@@ -479,8 +490,11 @@ namespace avp {
         }
         break;
       case Status_t::AP_MODE:
-        if(WiFi.softAPgetStationNum() > 0) AP_MODE_ACTIVE_TO.Reset();
-        if(AP_MODE_ACTIVE_TO.Expired()) AsyncStartScanNetworks();
+        if(WiFi.softAPgetStationNum() > 0) { // a scan would hop channels under the client at /config
+          AP_MODE_ACTIVE_TO.Reset();
+          STA_RetryTO.Reset();
+        }
+        if(ssid != "" ? STA_RetryTO.Expired() : AP_MODE_ACTIVE_TO.Expired()) AsyncStartScanNetworks();
         break;
       case Status_t::SCANNING:
         CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
