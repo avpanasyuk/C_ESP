@@ -191,13 +191,23 @@ namespace avp {
 
     static constexpr uint8_t STR_SIZE = 32;          ///< ssid and password string sizes
     static constexpr int32_t MinRSSIdiffToJump = 20; // dB
+
+    /// SoftAP hold before the next STA retry: starts at the floor, doubles on each fallback up
+    /// to the cap, back to the floor on a connect. A router reboot then costs ~30 s, not 10 min.
+    /// Set before begin().
+    static inline uint32_t AP_HoldFloor_ms = 30UL * 1000, AP_HoldCap_ms = 10UL * 60 * 1000;
   protected:
+    static inline uint32_t AP_Interval_ms, AP_Deadline_ms, ScanStart_ms;
+    /// One-shot, set by /config: the fallback after a submitted config holds the portal for the
+    /// cap, so the user can correct a mistyped password.
+    static inline bool ConfigGrace = false;
+    /// A real scan takes ≤ 6 s (ESP32) / 2-4 s (ESP8266); one still running after this is wedged.
+    static constexpr uint32_t ScanBudget_ms = 30UL * 1000;
     static inline IPAddress ip;
     static inline const char *Name;
     static inline String ssid, pass;
     static inline status_indication_func_t status_indication_func;
     static inline avp::TimePeriod1<10UL * 1000, millis> ConnectionTO;           // 10 seconds
-    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // 10 minutes
     static inline avp::TimePeriod1<10UL * 60 * 1000, millis> RescanTO;          // time to rescan AP, maybe we can get new connection
     static inline int32_t Channel = 0;
 
@@ -224,6 +234,7 @@ namespace avp {
       ssid = default_ssid;
       pass = default_pass;
       status_indication_func = status_indication_func_;
+      AP_Interval_ms = AP_HoldFloor_ms;
 
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
       // If we booted a freshly-OTA'd image, the bootloader left it PENDING_VERIFY: we must confirm
@@ -272,7 +283,7 @@ namespace avp {
         SetMode(WIFI_STA);
         scanNetworks(false);
         if(CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str())) {
-          WiFi.waitForConnectResult();
+          WiFi.waitForConnectResult(15000); // the core's 60 s default delays the portal
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
           else open_AP(); // if anything went wrong open AP
         }
@@ -366,6 +377,8 @@ namespace avp {
         debug_printf("Connected in STA mode, IP:%s!\n", getIP().c_str());
       ConnStatus = Status_t::CONNECTED;
       RescanTO.Reset();
+      AP_Interval_ms = AP_HoldFloor_ms;
+      ConfigGrace = false;
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
       ConfirmOTAImage(); // back online -> a freshly-flashed image has proven itself
 #endif
@@ -415,17 +428,23 @@ namespace avp {
     static void open_AP() {
       // Capture the STA status we're abandoning *before* switching the radio to AP
       // mode, so /log records WHY every fallback happened (not just that it did).
-      // ESP8266 wl_status_t: 0=IDLE 1=NO_SSID_AVAIL 2=SCAN_DONE 3=CONNECTED
-      //                      4=CONNECT_FAILED 5=CONNECTION_LOST 6=WRONG_PASSWORD 7=DISCONNECTED.
+      // wl_status_t, ESP8266: 0=IDLE 1=NO_SSID_AVAIL 2=SCAN_DONE 3=CONNECTED
+      //   4=CONNECT_FAILED 5=CONNECTION_LOST 6=WRONG_PASSWORD 7=DISCONNECTED.
+      // ESP32 (core 2.x): the same 0-5, 6=DISCONNECTED; no wrong-password code.
       int sta_status = WiFi.status();
       SetMode(WIFI_AP);
       WiFi.softAP(Name, "");
       ip = WiFi.softAPIP();
-      AP_MODE_ACTIVE_TO.Reset();
+      uint32_t hold = ConfigGrace ? AP_HoldCap_ms : AP_Interval_ms;
+      ConfigGrace = false;
+      const long jitter = long(hold / 10); // ±10 %, so units sharing a router do not retry in step
+      hold += random(-jitter, jitter + 1);
+      AP_Deadline_ms = millis() + hold;
+      AP_Interval_ms = min(2 * AP_Interval_ms, AP_HoldCap_ms);
       ConnStatus = Status_t::AP_MODE;
-      debug_printf("Waiting for connection in AP mode, IP:%s! (left STA status=%d)\n",
+      debug_printf("Waiting for connection in AP mode, IP:%s! (left STA status=%d, retry in %lu s)\n",
         (String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3])).c_str(),
-        sta_status);
+        sta_status, (unsigned long)(hold / 1000));
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
       ConfirmOTAImage(); // SoftAP is a valid recovery surface (user can reach /config) -> keep the image
 #endif
@@ -480,6 +499,7 @@ namespace avp {
 
     static void AsyncStartScanNetworks() {
       ConnStatus = Status_t::SCANNING;
+      ScanStart_ms = millis();
       SetMode(WIFI_STA);
       scanNetworks(true);
     } // AsyncScanNetworks
@@ -495,11 +515,21 @@ namespace avp {
         }
         break;
       case Status_t::AP_MODE:
-        if(WiFi.softAPgetStationNum() > 0) AP_MODE_ACTIVE_TO.Reset();
-        if(AP_MODE_ACTIVE_TO.Expired()) AsyncStartScanNetworks();
+        if(ssid.length() == 0) break; // nothing to join: the portal stays up
+        // A station on the portal holds it at the cap, without touching the ramp.
+        if(WiFi.softAPgetStationNum() > 0) AP_Deadline_ms = millis() + AP_HoldCap_ms;
+        else if(int32_t(millis() - AP_Deadline_ms) >= 0) AsyncStartScanNetworks();
         break;
       case Status_t::SCANNING:
         CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
+        if(ConnStatus == Status_t::SCANNING && millis() - ScanStart_ms > ScanBudget_ms) {
+          if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
+          else {
+            debug_puts("WiFi scan wedged -- rebooting to recover\n");
+            delay(100);
+            ESP.restart();
+          }
+        }
         break;
       case Status_t::TRYING_TO_CONNECT:
         switch(WiFi.status()) {

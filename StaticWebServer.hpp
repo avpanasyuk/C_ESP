@@ -152,6 +152,7 @@ namespace avp {
         String qsid = s.arg("ssid");
         String qpass = s.arg("pass");
         if(qsid.length() > 0 && qpass.length() > 0) {
+          ConfigGrace = true;
           send("text/plain", "WiFI configuration changed, connection is being reistablished!");
           delay(1000);
           WiFi.disconnect();
