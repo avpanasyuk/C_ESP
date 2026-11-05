@@ -340,12 +340,18 @@ namespace avp {
       begin(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_);
     } // begin
 
-    /// WiFi.mode() followed by the configured TX power, synchronously, so the scan and connect
+    /// WiFi.mode() followed by the configured TX power, before returning, so the scan and connect
     /// that follow already run at it.
     static void SetMode(WiFiMode_t m) {
       WiFi.mode(m);
 #ifdef ESP32
-      if(TxPower_qdBm >= 0) WiFi.setTxPower(wifi_power_t(TxPower_qdBm));
+      if(TxPower_qdBm >= 0) {
+        // setTxPower() refuses until the *_STARTED bit is set, and only the event task sets it,
+        // after mode() has returned; on AP->STA the old AP bit would pass the check too early.
+        const int bit = (m & WIFI_MODE_STA) ? STA_STARTED_BIT : AP_STARTED_BIT;
+        if(!WiFi.waitStatusBits(bit, 1000) || !WiFi.setTxPower(wifi_power_t(TxPower_qdBm)))
+          debug_printf("TX power %d not applied (mode %d)\n", int(TxPower_qdBm), int(m));
+      }
 #endif
     } // SetMode
 
@@ -435,10 +441,10 @@ namespace avp {
       SetMode(WIFI_AP);
       WiFi.softAP(Name, "");
       ip = WiFi.softAPIP();
-      uint32_t hold = ConfigGrace ? AP_HoldCap_ms : AP_Interval_ms;
+      uint32_t hold = ConfigGrace ? AP_HoldCap_ms : min(AP_Interval_ms, AP_HoldCap_ms);
       ConfigGrace = false;
       const long jitter = long(hold / 10); // ±10 %, so units sharing a router do not retry in step
-      hold += random(-jitter, jitter + 1);
+      hold = uint32_t(long(hold) + random(-jitter, jitter + 1));
       AP_Deadline_ms = millis() + hold;
       AP_Interval_ms = min(2 * AP_Interval_ms, AP_HoldCap_ms);
       ConnStatus = Status_t::AP_MODE;
@@ -524,7 +530,9 @@ namespace avp {
         CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
         if(ConnStatus == Status_t::SCANNING && millis() - ScanStart_ms > ScanBudget_ms) {
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
-          else {
+          // ConfirmConnected() stays put without an IP; associated but no lease for the whole
+          // budget has no other exit.
+          if(ConnStatus == Status_t::SCANNING) {
             debug_puts("WiFi scan wedged -- rebooting to recover\n");
             delay(100);
             ESP.restart();
