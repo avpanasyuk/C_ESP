@@ -417,7 +417,7 @@ namespace avp {
             // or current RSSI is fine
             ConfirmConnected();
           } else {
-            SetMode(WIFI_STA);
+            SetMode(WIFI_STA); // load-bearing: scanNetworks() changed the mode without TxPower_qdBm
             WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
             ConnStatus = Status_t::TRYING_TO_CONNECT;
             ConnectionTO.Reset();
@@ -522,7 +522,8 @@ namespace avp {
         break;
       case Status_t::AP_MODE:
         if(ssid.length() == 0) break; // nothing to join: the portal stays up
-        // A station on the portal holds it at the cap, without touching the ramp.
+        // A station on the portal holds it at the cap, without touching the ramp, so a person
+        // mid-edit keeps it; while any station stays associated the device is off the LAN.
         if(WiFi.softAPgetStationNum() > 0) AP_Deadline_ms = millis() + AP_HoldCap_ms;
         else if(int32_t(millis() - AP_Deadline_ms) >= 0) AsyncStartScanNetworks();
         break;
