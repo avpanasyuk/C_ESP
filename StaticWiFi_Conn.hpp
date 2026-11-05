@@ -100,6 +100,13 @@ namespace avp {
       0xFF;
 #endif
 
+#ifdef ESP32
+    /// WiFi TX power as a wifi_power_t value (0.25 dBm units), applied after every WiFi.mode()
+    /// because a mode change resets it; negative leaves the driver default. Set before begin().
+    /// Some boards need it: the ESP32-C3 SuperMini's chip antenna fails to associate at 19.5 dBm.
+    static inline int8_t TxPower_qdBm = -1;
+#endif
+
     /**
      * @brief I have tried to make it a template on LEB_BUILTIN, but templates do not implement IRAM_ATTR 
      * attribute which caused crashes when Blinken was called from ISR
@@ -262,7 +269,7 @@ namespace avp {
         WiFi.setHostname(Name); // configured per-device name, consistent with MDNS/OTA/softAP below
 
         // Let's see what we have here
-        WiFi.mode(WIFI_STA);
+        SetMode(WIFI_STA);
         scanNetworks(false);
         if(CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str())) {
           WiFi.waitForConnectResult();
@@ -321,6 +328,15 @@ namespace avp {
     static void begin(const Options_t &Opts = DefaultOpts()) {
       begin(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_);
     } // begin
+
+    /// WiFi.mode() followed by the configured TX power, synchronously, so the scan and connect
+    /// that follow already run at it.
+    static void SetMode(WiFiMode_t m) {
+      WiFi.mode(m);
+#ifdef ESP32
+      if(TxPower_qdBm >= 0) WiFi.setTxPower(wifi_power_t(TxPower_qdBm));
+#endif
+    } // SetMode
 
     static void scanNetworks(bool IsAsync, const char *ssid_str = ssid.c_str()) {
 #ifdef ESP8266
@@ -382,7 +398,7 @@ namespace avp {
             // or current RSSI is fine
             ConfirmConnected();
           } else {
-            WiFi.mode(WIFI_STA);
+            SetMode(WIFI_STA);
             WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
             ConnStatus = Status_t::TRYING_TO_CONNECT;
             ConnectionTO.Reset();
@@ -402,7 +418,7 @@ namespace avp {
       // ESP8266 wl_status_t: 0=IDLE 1=NO_SSID_AVAIL 2=SCAN_DONE 3=CONNECTED
       //                      4=CONNECT_FAILED 5=CONNECTION_LOST 6=WRONG_PASSWORD 7=DISCONNECTED.
       int sta_status = WiFi.status();
-      WiFi.mode(WIFI_AP);
+      SetMode(WIFI_AP);
       WiFi.softAP(Name, "");
       ip = WiFi.softAPIP();
       AP_MODE_ACTIVE_TO.Reset();
@@ -464,7 +480,7 @@ namespace avp {
 
     static void AsyncStartScanNetworks() {
       ConnStatus = Status_t::SCANNING;
-      WiFi.mode(WIFI_STA);
+      SetMode(WIFI_STA);
       scanNetworks(true);
     } // AsyncScanNetworks
 
