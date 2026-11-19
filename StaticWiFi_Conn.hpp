@@ -369,6 +369,17 @@ namespace avp {
 #endif
     } // scanNetworks
 
+    /// WiFi.scanComplete() that waits for the radio. ESP32 core 2.x tests its own timeout
+    /// (20 x 300 ms = 6 s) before the done bit, and an all-channel scan in AP_STA takes ~6.2 s, so it
+    /// reports FAILED for every fallback scan (arduino-esp32 PR #8981 fixed the order in 3.x). A scan
+    /// that never finishes ends in the scan budget's reboot instead.
+    static int16_t ScanComplete() {
+#ifdef ESP32
+      if(WiFi.getStatusBits() & WIFI_SCANNING_BIT) return WIFI_SCAN_RUNNING;
+#endif
+      return WiFi.scanComplete();
+    } // ScanComplete
+
     static void ConfirmConnected() {
       IPAddress newIP = WiFi.localIP();
       if((uint32_t)newIP == 0) {
@@ -414,7 +425,7 @@ namespace avp {
      * @retval I have called WiFi.begin() and actually trying to connect
      */
     static bool CheckScanAndTryToConnectToBestAP(const char *SSID, const char *Pass) {
-      if(WiFi.scanComplete() != WIFI_SCAN_RUNNING) {
+      if(ScanComplete() != WIFI_SCAN_RUNNING) {
         avp::CallWhenOutOfScope _([]() {
           WiFi.scanDelete();
         });
@@ -562,7 +573,7 @@ namespace avp {
           // wedged (neither core clears its scanning flag on scanDelete), and a retry would be
           // refused, so that case reboots, associated or not.
           if(ConnStatus == Status_t::SCANNING && WiFi.status() == WL_CONNECTED &&
-            WiFi.scanComplete() != WIFI_SCAN_RUNNING) {
+            ScanComplete() != WIFI_SCAN_RUNNING) {
             debug_puts("Associated without an IP for the scan budget\n");
             WiFi.scanDelete();
             open_AP();

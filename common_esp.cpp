@@ -49,6 +49,9 @@ namespace avp {
   */
   bool FindTheBestAPinScan(uint8_t &BestRSSI_i, int32_t &Channel) {
     auto NumAPs = WiFi.scanComplete();
+#ifndef NDEBUG
+    debug_printf("Scan done: %d APs (channel was %d, mode %d)\n", int(NumAPs), int(Channel), int(WiFi.getMode()));
+#endif
     if(NumAPs < 1) {
       Channel = 0; // we can not find old channel, lets check all of them
       return false;
