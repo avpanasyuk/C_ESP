@@ -347,9 +347,14 @@ namespace avp {
         const int bits = ((m & WIFI_MODE_STA) ? STA_STARTED_BIT : 0) | ((m & WIFI_MODE_AP) ? AP_STARTED_BIT : 0);
         if((WiFi.waitStatusBits(bits, 1000) & bits) != bits || !WiFi.setTxPower(wifi_power_t(TxPower_qdBm)))
           debug_printf("TX power %d not applied (mode %d)\n", int(TxPower_qdBm), int(m));
-        // Read back, logged only on a mismatch: SetMode runs on every 30 s retry in an outage.
-        else if(int(WiFi.getTxPower()) != TxPower_qdBm)
-          debug_printf("TX power reads %d qdBm, set %d (mode %d)\n", int(WiFi.getTxPower()), int(TxPower_qdBm), int(m));
+        // Read back, logged only on a new mismatch: SetMode runs on every 30 s retry in an outage.
+        else {
+          static int logged = -1;
+          const int got = int(WiFi.getTxPower());
+          if(got != TxPower_qdBm && got != logged)
+            debug_printf("TX power reads %d qdBm, set %d (mode %d)\n", got, int(TxPower_qdBm), int(m));
+          logged = got == TxPower_qdBm ? -1 : got;
+        }
       }
 #endif
     } // SetMode
@@ -535,6 +540,11 @@ namespace avp {
         break;
       case Status_t::AP_MODE:
         if(ssid.length() == 0) break; // nothing to join: the portal stays up
+        // The station beside the softAP can still associate and get its lease after the park.
+        if(WiFi.status() == WL_CONNECTED && (uint32_t)WiFi.localIP() != 0) {
+          ConfirmConnected();
+          break;
+        }
         // A scan hops channels under a softAP client, so one attached defers the retry, but only
         // up to AP_MODE_ACTIVE_TO: a phone left associated must not keep the device off the LAN.
         // An upload through the softAP is never cut off by a scan.
