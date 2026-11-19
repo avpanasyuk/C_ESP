@@ -641,7 +641,7 @@ namespace avp {
       // (with credentials: never joined; without: never opened the portal) reverts to last-good. A
       // router outage inside that window reverts a good image too; the old one still runs. (A
       // hang/crash is handled separately: the bootloader rolls back a PENDING_VERIFY image on reset.)
-      if(RollbackPending && millis() > OTA_ConfirmTimeout_ms) {
+      if(RollbackPending && !OTA_IsInProgress && millis() > OTA_ConfirmTimeout_ms) { // an upload finishes first
         debug_puts("OTA image never confirmed -- rolling back to previous firmware\n");
         delay(100);
         esp_ota_mark_app_invalid_rollback_and_reboot(); // does not return on success
