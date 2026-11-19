@@ -281,6 +281,9 @@ namespace avp {
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
           else open_AP(); // if anything went wrong open AP
         }
+        // The sync scan gives up after 10 s with the scan still running, which ScanComplete() reports
+        // as RUNNING; call_in_loop() has no IDLE case, so park and let the retry rescan.
+        if(ConnStatus == Status_t::IDLE) open_AP();
       }
       MDNS.begin(Name);
 
@@ -360,6 +363,7 @@ namespace avp {
     } // SetMode
 
     static void scanNetworks(bool IsAsync, const char *ssid_str = ssid.c_str()) {
+      ScanStart_ms = millis(); // ScanComplete()'s grace, the boot scan included
 #ifdef ESP8266
       WiFi.scanNetworks(IsAsync, false, Channel, (uint8_t *)ssid_str);
 #endif
@@ -542,7 +546,6 @@ namespace avp {
 
     static void AsyncStartScanNetworks() {
       ConnStatus = Status_t::SCANNING;
-      ScanStart_ms = millis();
       SetMode(WiFi.getMode() == WIFI_AP_STA ? WIFI_AP_STA : WIFI_STA); // keep a recovery softAP up while retrying
       scanNetworks(true);
     } // AsyncScanNetworks
@@ -577,9 +580,10 @@ namespace avp {
         if(ConnStatus == Status_t::SCANNING && millis() - ScanStart_ms > ScanBudget_ms) {
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
           // Associated, scan finished, no lease yet: park with the portal up and retry in 30 s; a
-          // reboot would end in the same no-IP state without a softAP. A scan still RUNNING is
-          // wedged (neither core clears its scanning flag on scanDelete), and a retry would be
-          // refused, so that case reboots, associated or not.
+          // reboot would end in the same no-IP state without a softAP. On ESP8266 a scan still
+          // RUNNING is wedged (scanDelete does not clear the scanning flag) and a retry would be
+          // refused, so that case reboots, associated or not. On ESP32 ScanComplete() gives up at
+          // 15 s and CheckScan parks, so only the park is reachable here.
           if(ConnStatus == Status_t::SCANNING && WiFi.status() == WL_CONNECTED &&
             ScanComplete() != WIFI_SCAN_RUNNING) {
             debug_puts("Associated without an IP for the scan budget\n");
