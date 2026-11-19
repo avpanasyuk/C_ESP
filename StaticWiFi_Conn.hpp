@@ -248,7 +248,7 @@ namespace avp {
         esp_ota_img_states_t st;
         if(running && esp_ota_get_state_partition(running, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
           RollbackPending = true;
-          debug_puts("OTA image on probation: confirm on connect/SoftAP, else roll back\n");
+          debug_puts("OTA image on probation: confirmed by a join (portal without credentials), else rolled back\n");
         }
       }
 #endif
