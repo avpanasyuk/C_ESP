@@ -100,6 +100,13 @@ namespace avp {
       0xFF;
 #endif
 
+#ifdef ESP32
+    /// WiFi TX power as a wifi_power_t value (0.25 dBm units), applied after every WiFi.mode()
+    /// because a mode change resets it; negative leaves the driver default. Set before begin().
+    /// Some boards need it: the ESP32-C3 SuperMini's chip antenna fails to associate at 19.5 dBm.
+    static inline int8_t TxPower_qdBm = -1;
+#endif
+
     /**
      * @brief I have tried to make it a template on LEB_BUILTIN, but templates do not implement IRAM_ATTR 
      * attribute which caused crashes when Blinken was called from ISR
@@ -184,15 +191,18 @@ namespace avp {
 
     static constexpr uint8_t STR_SIZE = 32;          ///< ssid and password string sizes
     static constexpr int32_t MinRSSIdiffToJump = 20; // dB
+
   protected:
+    static inline uint32_t ScanStart_ms;
+    /// A real scan takes ≤ 6 s (ESP32) / 2-4 s (ESP8266); one still running after this is wedged.
+    static constexpr uint32_t ScanBudget_ms = 30UL * 1000;
     static inline IPAddress ip;
     static inline const char *Name;
     static inline String ssid, pass;
     static inline status_indication_func_t status_indication_func;
     static inline avp::TimePeriod1<10UL * 1000, millis> ConnectionTO;           // 10 seconds
-    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // 10 minutes, no credentials
+    static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // cap on a softAP client deferring the retry
     static inline avp::TimePeriod1<30UL * 1000, millis> STA_RetryTO;            // with credentials: retry STA this often
-    static inline avp::TimePeriod1<30UL * 1000, millis> ScanTO;                 // an async scan takes a few seconds
     static inline avp::TimePeriod1<10UL * 60 * 1000, millis> RescanTO;          // time to rescan AP, maybe we can get new connection
     static inline int32_t Channel = 0;
 
@@ -264,10 +274,10 @@ namespace avp {
         WiFi.setHostname(Name); // configured per-device name, consistent with MDNS/OTA/softAP below
 
         // Let's see what we have here
-        WiFi.mode(WIFI_STA);
+        SetMode(WIFI_STA);
         scanNetworks(false);
         if(CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str())) {
-          WiFi.waitForConnectResult();
+          WiFi.waitForConnectResult(15000); // the core's 60 s default delays the portal
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
           else open_AP(); // if anything went wrong open AP
         }
@@ -324,6 +334,21 @@ namespace avp {
       begin(Opts.Name, Opts.default_ssid, Opts.default_pass, Opts.status_indication_func_);
     } // begin
 
+    /// WiFi.mode() followed by the configured TX power, before returning, so the scan and connect
+    /// that follow already run at it.
+    static void SetMode(WiFiMode_t m) {
+      WiFi.mode(m);
+#ifdef ESP32
+      if(TxPower_qdBm >= 0) {
+        // setTxPower() refuses until the *_STARTED bit is set, and only the event task sets it,
+        // after mode() has returned; on AP->STA the old AP bit would pass the check too early.
+        const int bit = (m & WIFI_MODE_STA) ? STA_STARTED_BIT : AP_STARTED_BIT;
+        if(!WiFi.waitStatusBits(bit, 1000) || !WiFi.setTxPower(wifi_power_t(TxPower_qdBm)))
+          debug_printf("TX power %d not applied (mode %d)\n", int(TxPower_qdBm), int(m));
+      }
+#endif
+    } // SetMode
+
     static void scanNetworks(bool IsAsync, const char *ssid_str = ssid.c_str()) {
 #ifdef ESP8266
       WiFi.scanNetworks(IsAsync, false, Channel, (uint8_t *)ssid_str);
@@ -354,6 +379,7 @@ namespace avp {
       RescanTO.Reset();
       if(WiFi.getMode() == WIFI_AP_STA) { // the recovery softAP is no longer needed
         bool closed = WiFi.softAPdisconnect(true);
+        SetMode(WIFI_STA); // the AP_STA->STA change resets the TX power; SetMode re-applies it
         debug_printf("SoftAP close %s, STA status %d, IP %s\n", closed ? "ok" : "FAILED", (int)WiFi.status(),
           WiFi.localIP().toString().c_str());
       }
@@ -389,7 +415,9 @@ namespace avp {
             // or current RSSI is fine
             ConfirmConnected();
           } else {
-            if(WiFi.getMode() != WIFI_AP_STA) WiFi.mode(WIFI_STA);
+            // load-bearing: scanNetworks() changed the mode without TxPower_qdBm; AP_STA keeps
+            // the recovery softAP up while the station joins
+            SetMode(WiFi.getMode() == WIFI_AP_STA ? WIFI_AP_STA : WIFI_STA);
             WiFi.begin(SSID, Pass, WiFi.channel(BestRSSI_i), WiFi.BSSID(BestRSSI_i));
             ConnStatus = Status_t::TRYING_TO_CONNECT;
             ConnectionTO.Reset();
@@ -406,8 +434,9 @@ namespace avp {
     static void open_AP() {
       // Capture the STA status we're abandoning *before* switching the radio to AP
       // mode, so /log records WHY every fallback happened (not just that it did).
-      // ESP8266 wl_status_t: 0=IDLE 1=NO_SSID_AVAIL 2=SCAN_DONE 3=CONNECTED
-      //                      4=CONNECT_FAILED 5=CONNECTION_LOST 6=WRONG_PASSWORD 7=DISCONNECTED.
+      // wl_status_t, ESP8266: 0=IDLE 1=NO_SSID_AVAIL 2=SCAN_DONE 3=CONNECTED
+      //   4=CONNECT_FAILED 5=CONNECTION_LOST 6=WRONG_PASSWORD 7=DISCONNECTED.
+      // ESP32 (core 2.x): the same 0-5, 6=DISCONNECTED; no wrong-password code.
       // With credentials the station keeps retrying beside the softAP: an AP-only park took a
       // provisioned device off the network for 10 minutes after one failed reconnect.
       // A failed retry re-enters here every ~30 s; only a new status is logged, so the retries do
@@ -416,7 +445,7 @@ namespace avp {
       int sta_status = WiFi.status();
       bool keepSTA = ssid != "";
       bool entering = WiFi.getMode() != (keepSTA ? WIFI_AP_STA : WIFI_AP);
-      if(entering) WiFi.mode(keepSTA ? WIFI_AP_STA : WIFI_AP);
+      if(entering) SetMode(keepSTA ? WIFI_AP_STA : WIFI_AP);
       // Unconditional: the mode bit says nothing about whether the AP is actually up. With an
       // unchanged config the ESP8266 core skips the config write but restarts the softAP DHCP server.
       bool apUp = WiFi.softAP(Name, "");
@@ -484,9 +513,9 @@ namespace avp {
 
     static void AsyncStartScanNetworks() {
       ConnStatus = Status_t::SCANNING;
-      if(WiFi.getMode() != WIFI_AP_STA) WiFi.mode(WIFI_STA); // keep a recovery softAP up while retrying
+      ScanStart_ms = millis();
+      SetMode(WiFi.getMode() == WIFI_AP_STA ? WIFI_AP_STA : WIFI_STA); // keep a recovery softAP up while retrying
       scanNetworks(true);
-      ScanTO.Reset();
     } // AsyncScanNetworks
 
     static void call_in_loop() {
@@ -500,24 +529,26 @@ namespace avp {
         }
         break;
       case Status_t::AP_MODE:
-        if(ssid == "") { // provisioning: stay up while someone is at /config
-          if(WiFi.softAPgetStationNum() > 0) AP_MODE_ACTIVE_TO.Reset();
-          if(AP_MODE_ACTIVE_TO.Expired()) AsyncStartScanNetworks();
-        } else if(STA_RetryTO.JustCheck() && (WiFi.softAPgetStationNum() == 0 || AP_MODE_ACTIVE_TO.JustCheck()))
-          // a scan hops channels under a softAP client, so one attached defers the retry, but only
-          // up to AP_MODE_ACTIVE_TO: a phone left associated must not keep the device off the LAN
+        if(ssid.length() == 0) break; // nothing to join: the portal stays up
+        // A scan hops channels under a softAP client, so one attached defers the retry, but only
+        // up to AP_MODE_ACTIVE_TO: a phone left associated must not keep the device off the LAN.
+        // An upload through the softAP is never cut off by a scan.
+        if(!OTA_IsInProgress && STA_RetryTO.JustCheck() &&
+          (WiFi.softAPgetStationNum() == 0 || AP_MODE_ACTIVE_TO.JustCheck()))
           AsyncStartScanNetworks();
         break;
       case Status_t::SCANNING:
-        if(ScanTO.JustCheck() && WiFi.scanComplete() == WIFI_SCAN_RUNNING) { // SCAN_DONE never came
-          // ESP8266 scanDelete() leaves the core's _scanStarted set, so scanComplete() still says
-          // RUNNING next pass: the reset limits this branch to once per ScanTO.
-          ScanTO.Reset();
-          debug_puts("WiFi scan timed out\n");
-          WiFi.scanDelete();
+        CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
+        if(ConnStatus == Status_t::SCANNING && millis() - ScanStart_ms > ScanBudget_ms) {
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
-          if(ConnStatus == Status_t::SCANNING) open_AP(); // no link, or a link with no IP yet
-        } else CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
+          // ConfirmConnected() stays put without an IP; associated but no lease for the whole
+          // budget has no other exit.
+          if(ConnStatus == Status_t::SCANNING) {
+            debug_puts("WiFi scan wedged -- rebooting to recover\n");
+            delay(100);
+            ESP.restart();
+          }
+        }
         break;
       case Status_t::TRYING_TO_CONNECT:
         switch(WiFi.status()) {
