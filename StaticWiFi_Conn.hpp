@@ -540,8 +540,9 @@ namespace avp {
         break;
       case Status_t::AP_MODE:
         if(ssid.length() == 0) break; // nothing to join: the portal stays up
-        // The station beside the softAP can still associate and get its lease after the park.
-        if(WiFi.status() == WL_CONNECTED && (uint32_t)WiFi.localIP() != 0) {
+        // The station beside the softAP can still associate and get its lease after the park; the
+        // promotion closes the softAP, so it waits out an upload through it.
+        if(!OTA_IsInProgress && WiFi.status() == WL_CONNECTED && (uint32_t)WiFi.localIP() != 0) {
           ConfirmConnected();
           break;
         }
