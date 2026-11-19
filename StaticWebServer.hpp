@@ -227,6 +227,7 @@ namespace avp {
       Resp = F("</ol></p><p><b>WiFi networks:</b></p>");
       Resp += "<p>";
       Resp += scan();
+      SetMode(WiFi.getMode()); // scanNetworks() may add STA, which resets the TX power
       Resp += F("</p><form method='get' action='/config'><label>SSID: </label><input name='ssid' maxlength=");
       Resp += STR_SIZE - 1;
       Resp += " value='";
