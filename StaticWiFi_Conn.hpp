@@ -187,6 +187,9 @@ namespace avp {
         debug_puts("OTA image confirmed valid (rollback cancelled)\n");
       }
     } // ConfirmOTAImage
+    static bool OnOTAProbation() { return RollbackPending; }
+#else
+    static constexpr bool OnOTAProbation() { return false; }
 #endif
 
     static constexpr uint8_t STR_SIZE = 32;          ///< ssid and password string sizes
@@ -580,7 +583,7 @@ namespace avp {
         // An image on OTA probation never defers: only a join confirms it, within
         // OTA_ConfirmTimeout_ms. An upload through the softAP is never cut off by a scan.
         if(!OTA_IsInProgress && STA_RetryTO.JustCheck() &&
-          (WiFi.softAPgetStationNum() == 0 || AP_MODE_ACTIVE_TO.JustCheck() || RollbackPending))
+          (WiFi.softAPgetStationNum() == 0 || AP_MODE_ACTIVE_TO.JustCheck() || OnOTAProbation()))
           AsyncStartScanNetworks();
         break;
       case Status_t::SCANNING:
