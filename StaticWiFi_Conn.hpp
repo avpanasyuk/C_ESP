@@ -372,12 +372,15 @@ namespace avp {
     /// WiFi.scanComplete() that waits for the radio. ESP32 core 2.x tests its own timeout
     /// (20 x 300 ms = 6 s) before the done bit, and an all-channel scan in AP_STA takes ~6.2 s, so it
     /// reports FAILED for every fallback scan (arduino-esp32 PR #8981 fixed the order in 3.x). A scan
-    /// that never finishes ends in the scan budget's reboot instead. DONE wins over SCANNING, as in the
-    /// core: _scanDone() sets DONE before it clears SCANNING.
+    /// that is waited for up to 15 s, 2.4x the AP_STA scan. After that the core's call reports FAILED and
+    /// clears its scanning flag, so the next scan can start: a scan started while the station dropped
+    /// never got its done event on the bench. DONE wins over SCANNING, as in the core: _scanDone() sets
+    /// DONE before it clears SCANNING.
     static int16_t ScanComplete() {
 #ifdef ESP32
       const int bits = WiFi.getStatusBits();
-      if((bits & WIFI_SCANNING_BIT) && !(bits & WIFI_SCAN_DONE_BIT)) return WIFI_SCAN_RUNNING;
+      if((bits & WIFI_SCANNING_BIT) && !(bits & WIFI_SCAN_DONE_BIT) && millis() - ScanStart_ms < 15000)
+        return WIFI_SCAN_RUNNING;
 #endif
       return WiFi.scanComplete();
     } // ScanComplete
