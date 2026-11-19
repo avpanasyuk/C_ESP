@@ -175,7 +175,7 @@ namespace avp {
 
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
     static inline bool RollbackPending = false; ///< running image is PENDING_VERIFY: confirm once recoverable, else revert
-    static constexpr uint32_t OTA_ConfirmTimeout_ms = 5UL * 60 * 1000; ///< reach STA or SoftAP within this of boot, else roll back
+    static constexpr uint32_t OTA_ConfirmTimeout_ms = 5UL * 60 * 1000; ///< confirm within this of boot, else roll back
 
     /// Cancel a pending OTA rollback. Called once a freshly-flashed image reaches a *recoverable*
     /// state -- STA connected OR a working SoftAP (both let the user reach /config) -- so it is good
@@ -232,7 +232,8 @@ namespace avp {
 
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
       // If we booted a freshly-OTA'd image, the bootloader left it PENDING_VERIFY: we must confirm
-      // it valid (see ConfirmOTAImage) once we reach STA or SoftAP, or it is rolled back on reboot.
+      // it valid (see ConfirmOTAImage) once it joins (or, without credentials, opens the portal), or
+      // it is rolled back.
       {
         const esp_partition_t *running = esp_ota_get_running_partition();
         esp_ota_img_states_t st;
@@ -495,7 +496,10 @@ namespace avp {
           ip.toString().c_str(), apUp ? "" : " (softAP down)", sta_status);
       logged_status = sta_status;
 #if defined(DO_OTA) && DO_OTA && defined(ESP32)
-      ConfirmOTAImage(); // SoftAP is a valid recovery surface (user can reach /config) -> keep the image
+      // Only without credentials, where the portal is the device's whole job. With credentials an image
+      // proves itself by joining: a softAP is no proof (at a reduced TxPower_qdBm the C3 SuperMini's
+      // softAP was unreachable at 1 m), and confirming here would strand an image that cannot join.
+      if(!keepSTA) ConfirmOTAImage();
 #endif
     } // open_AP
 
@@ -629,13 +633,12 @@ namespace avp {
         ESP.restart();
       }
 #if defined(ESP32)
-      // Last-resort rollback: a freshly-flashed image that reaches neither STA nor SoftAP within
-      // OTA_ConfirmTimeout_ms (wedged in SCANNING/TRYING, etc.) is broken -- revert to last-good.
-      // ConfirmOTAImage() already cleared RollbackPending on any STA/SoftAP success, so this only
-      // fires when the image is genuinely unreachable. (A full hang/crash is handled separately:
-      // the bootloader auto-rolls-back a still-PENDING_VERIFY image on the next reset.)
+      // Last-resort rollback: a freshly-flashed image not confirmed within OTA_ConfirmTimeout_ms
+      // (with credentials: never joined; without: never opened the portal) reverts to last-good. A
+      // router outage inside that window reverts a good image too; the old one still runs. (A
+      // hang/crash is handled separately: the bootloader rolls back a PENDING_VERIFY image on reset.)
       if(RollbackPending && millis() > OTA_ConfirmTimeout_ms) {
-        debug_puts("OTA image reached neither STA nor SoftAP -- rolling back to previous firmware\n");
+        debug_puts("OTA image never confirmed -- rolling back to previous firmware\n");
         delay(100);
         esp_ota_mark_app_invalid_rollback_and_reboot(); // does not return on success
       }
