@@ -342,8 +342,8 @@ namespace avp {
       if(TxPower_qdBm >= 0) {
         // setTxPower() refuses until the *_STARTED bit is set, and only the event task sets it,
         // after mode() has returned; on AP->STA the old AP bit would pass the check too early.
-        // AP_STA waits for both bits: on STA->AP_STA the STA bit is already set. waitStatusBits
-        // returns the group's bits on timeout too, so only the requested bits all set is success.
+        // AP_STA waits for both bits: on STA->AP_STA the STA bit is already set. On a timeout
+        // waitStatusBits returns the subset of the bits already set, so only all of them is success.
         const int bits = ((m & WIFI_MODE_STA) ? STA_STARTED_BIT : 0) | ((m & WIFI_MODE_AP) ? AP_STARTED_BIT : 0);
         if((WiFi.waitStatusBits(bits, 1000) & bits) != bits || !WiFi.setTxPower(wifi_power_t(TxPower_qdBm)))
           debug_printf("TX power %d not applied (mode %d)\n", int(TxPower_qdBm), int(m));
