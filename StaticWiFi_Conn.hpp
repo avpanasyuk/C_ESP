@@ -111,7 +111,7 @@ namespace avp {
     /// transmitter) sets it longer. Set before begin(). On OTA probation the retry runs at most
     /// every STA_RetryProbation_ms regardless, so the image can still join within the window.
     static inline uint32_t STA_Retry_ms = 30UL * 1000;
-    static constexpr uint32_t STA_RetryProbation_ms = 30UL * 1000;
+    static inline constexpr uint32_t STA_RetryProbation_ms = 30UL * 1000;
 
     /**
      * @brief I have tried to make it a template on LEB_BUILTIN, but templates do not implement IRAM_ATTR 
