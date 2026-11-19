@@ -372,10 +372,12 @@ namespace avp {
     /// WiFi.scanComplete() that waits for the radio. ESP32 core 2.x tests its own timeout
     /// (20 x 300 ms = 6 s) before the done bit, and an all-channel scan in AP_STA takes ~6.2 s, so it
     /// reports FAILED for every fallback scan (arduino-esp32 PR #8981 fixed the order in 3.x). A scan
-    /// that never finishes ends in the scan budget's reboot instead.
+    /// that never finishes ends in the scan budget's reboot instead. DONE wins over SCANNING, as in the
+    /// core: _scanDone() sets DONE before it clears SCANNING.
     static int16_t ScanComplete() {
 #ifdef ESP32
-      if(WiFi.getStatusBits() & WIFI_SCANNING_BIT) return WIFI_SCAN_RUNNING;
+      const int bits = WiFi.getStatusBits();
+      if((bits & WIFI_SCANNING_BIT) && !(bits & WIFI_SCAN_DONE_BIT)) return WIFI_SCAN_RUNNING;
 #endif
       return WiFi.scanComplete();
     } // ScanComplete
@@ -399,7 +401,10 @@ namespace avp {
       ConnStatus = Status_t::CONNECTED;
       RescanTO.Reset();
       if(WiFi.getMode() == WIFI_AP_STA) { // the recovery softAP is no longer needed
-        bool closed = WiFi.softAPdisconnect(true);
+        WiFi.softAPdisconnect(true);
+        // Judged by the mode: ESP32 core 2.x returns false on success (it compares enableAP()'s bool
+        // with ESP_OK).
+        const bool closed = !(WiFi.getMode() & WIFI_AP);
         SetMode(WIFI_STA); // re-applies the TX power after the mode change
         debug_printf("SoftAP close %s, STA status %d, IP %s\n", closed ? "ok" : "FAILED", (int)WiFi.status(),
           WiFi.localIP().toString().c_str());
