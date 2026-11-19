@@ -472,6 +472,8 @@ namespace avp {
       // ESP32 (core 2.x): the same 0-5, 6=DISCONNECTED; no wrong-password code.
       // With credentials the station keeps retrying beside the softAP: an AP-only park took a
       // provisioned device off the network for 10 minutes after one failed reconnect.
+      // AP_STA has one radio: a station joining on another channel moves the softAP with it, which
+      // drops a softAP client. Inherent, not a defect.
       // A failed retry re-enters here every ~30 s; only a new status is logged, so the retries do
       // not flush the outage evidence out of /log.
       static int logged_status = -1;
