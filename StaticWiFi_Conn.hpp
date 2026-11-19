@@ -545,15 +545,16 @@ namespace avp {
       case Status_t::SCANNING:
         CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
         if(ConnStatus == Status_t::SCANNING && millis() - ScanStart_ms > ScanBudget_ms) {
-          if(WiFi.status() == WL_CONNECTED) {
-            ConfirmConnected();
-            // Associated, no lease yet: park with the portal up and retry in 30 s. A reboot would
-            // end in the same no-IP state without a softAP.
-            if(ConnStatus == Status_t::SCANNING) {
-              debug_puts("Associated without an IP for the scan budget\n");
-              WiFi.scanDelete();
-              open_AP();
-            }
+          if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
+          // Associated, scan finished, no lease yet: park with the portal up and retry in 30 s; a
+          // reboot would end in the same no-IP state without a softAP. A scan still RUNNING is
+          // wedged (neither core clears its scanning flag on scanDelete), and a retry would be
+          // refused, so that case reboots, associated or not.
+          if(ConnStatus == Status_t::SCANNING && WiFi.status() == WL_CONNECTED &&
+            WiFi.scanComplete() != WIFI_SCAN_RUNNING) {
+            debug_puts("Associated without an IP for the scan budget\n");
+            WiFi.scanDelete();
+            open_AP();
           }
           if(ConnStatus == Status_t::SCANNING) {
             debug_puts("WiFi scan wedged -- rebooting to recover\n");
