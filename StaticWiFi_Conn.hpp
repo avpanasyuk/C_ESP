@@ -106,6 +106,12 @@ namespace avp {
     /// Some boards need it: the ESP32-C3 SuperMini's chip antenna fails to associate at 19.5 dBm.
     static inline int8_t TxPower_qdBm = -1;
 #endif
+    /// With credentials, how often the station retries beside the softAP. Each retry is seconds of
+    /// scanning, so a device that must keep the radio quiet for whole minutes (a time-code
+    /// transmitter) sets it longer. Set before begin(). On OTA probation the retry runs at most
+    /// every STA_RetryProbation_ms regardless, so the image can still join within the window.
+    static inline uint32_t STA_Retry_ms = 30UL * 1000;
+    static constexpr uint32_t STA_RetryProbation_ms = 30UL * 1000;
 
     /**
      * @brief I have tried to make it a template on LEB_BUILTIN, but templates do not implement IRAM_ATTR 
@@ -205,7 +211,7 @@ namespace avp {
     static inline status_indication_func_t status_indication_func;
     static inline avp::TimePeriod1<10UL * 1000, millis> ConnectionTO;           // 10 seconds
     static inline avp::TimePeriod1<10UL * 60 * 1000, millis> AP_MODE_ACTIVE_TO; // cap on a softAP client deferring the retry
-    static inline avp::TimePeriod1<30UL * 1000, millis> STA_RetryTO;            // with credentials: retry STA this often
+    static inline uint32_t STA_RetryAt_ms;                                      // with credentials: next STA retry
     static inline avp::TimePeriod1<10UL * 60 * 1000, millis> RescanTO;          // time to rescan AP, maybe we can get new connection
     static inline int32_t Channel = 0;
 
@@ -354,7 +360,7 @@ namespace avp {
         const int bits = ((m & WIFI_MODE_STA) ? STA_STARTED_BIT : 0) | ((m & WIFI_MODE_AP) ? AP_STARTED_BIT : 0);
         if((WiFi.waitStatusBits(bits, 1000) & bits) != bits || !WiFi.setTxPower(wifi_power_t(TxPower_qdBm)))
           debug_printf("TX power %d not applied (mode %d)\n", int(TxPower_qdBm), int(m));
-        // Read back, logged only on a new mismatch: SetMode runs on every 30 s retry in an outage.
+        // Read back, logged only on a new mismatch: SetMode runs on every retry in an outage.
         else {
           static int logged = -1;
           const int got = int(WiFi.getTxPower());
@@ -479,7 +485,7 @@ namespace avp {
       // AP_STA has one radio: a station joining on another channel moves the softAP with it. ESP32
       // announces the move with a CSA and keeps clients that follow it; ESP8266 announces nothing, so
       // its client is dropped. Inherent, not a defect.
-      // A failed retry re-enters here every ~30 s; only a new status is logged, so the retries do
+      // A failed retry re-enters here every STA_Retry_ms; only a new status is logged, so the retries do
       // not flush the outage evidence out of /log.
       static int logged_status = -1;
       int sta_status = WiFi.status();
@@ -492,7 +498,7 @@ namespace avp {
       if(!apUp) debug_puts("SoftAP start FAILED\n");
       ip = WiFi.softAPIP();
       AP_MODE_ACTIVE_TO.Reset();
-      STA_RetryTO.Reset();
+      STA_RetryAt_ms = millis() + (OnOTAProbation() ? min(STA_Retry_ms, STA_RetryProbation_ms) : STA_Retry_ms);
       ConnStatus = Status_t::AP_MODE;
       if(entering || sta_status != logged_status)
         debug_printf("Waiting for connection in AP%s mode, IP:%s%s! (left STA status=%d)\n", keepSTA ? "+STA" : "",
@@ -582,7 +588,7 @@ namespace avp {
         // up to AP_MODE_ACTIVE_TO: a phone left associated must not keep the device off the LAN.
         // An image on OTA probation never defers: only a join confirms it, within
         // OTA_ConfirmTimeout_ms. An upload through the softAP is never cut off by a scan.
-        if(!OTA_IsInProgress && STA_RetryTO.JustCheck() &&
+        if(!OTA_IsInProgress && int32_t(millis() - STA_RetryAt_ms) >= 0 &&
           (WiFi.softAPgetStationNum() == 0 || AP_MODE_ACTIVE_TO.JustCheck() || OnOTAProbation()))
           AsyncStartScanNetworks();
         break;
@@ -590,7 +596,7 @@ namespace avp {
         CheckScanAndTryToConnectToBestAP(ssid.c_str(), pass.c_str());
         if(ConnStatus == Status_t::SCANNING && millis() - ScanStart_ms > ScanBudget_ms) {
           if(WiFi.status() == WL_CONNECTED) ConfirmConnected();
-          // Associated, scan finished, no lease yet: park with the portal up and retry in 30 s; a
+          // Associated, scan finished, no lease yet: park with the portal up and retry after STA_Retry_ms; a
           // reboot would end in the same no-IP state without a softAP. On ESP8266 a scan still
           // RUNNING is wedged (scanDelete does not clear the scanning flag) and a retry would be
           // refused, so that case reboots, associated or not. On ESP32 ScanComplete() gives up at
