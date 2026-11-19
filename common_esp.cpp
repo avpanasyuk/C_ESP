@@ -13,8 +13,8 @@
 
 #if defined(ESP32) && defined(DO_OTA) && DO_OTA
 // Override the Arduino-ESP32 core's weak hook so it does NOT auto-confirm a freshly-OTA'd image at
-// boot. StaticWiFi_Conn confirms the image only after it reaches STA or SoftAP, and rolls it back
-// otherwise (see StaticWiFi_Conn::ConfirmOTAImage / call_in_loop).
+// boot. StaticWiFi_Conn confirms the image once it joins (without credentials: once the portal is
+// up), and rolls it back otherwise (see StaticWiFi_Conn::ConfirmOTAImage / call_in_loop).
 extern "C" bool verifyRollbackLater() { return true; }
 #endif
 

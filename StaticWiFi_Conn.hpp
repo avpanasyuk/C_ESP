@@ -177,9 +177,9 @@ namespace avp {
     static inline bool RollbackPending = false; ///< running image is PENDING_VERIFY: confirm once recoverable, else revert
     static constexpr uint32_t OTA_ConfirmTimeout_ms = 5UL * 60 * 1000; ///< confirm within this of boot, else roll back
 
-    /// Cancel a pending OTA rollback. Called once a freshly-flashed image reaches a *recoverable*
-    /// state -- STA connected OR a working SoftAP (both let the user reach /config) -- so it is good
-    /// enough to keep. Rollback is reserved for an image that reaches neither (crash/hang/bootloop).
+    /// Cancel a pending OTA rollback. Called once a freshly-flashed image joins (gets a lease), or,
+    /// without credentials, once the portal opens. An image that does neither within
+    /// OTA_ConfirmTimeout_ms, or crashes first, is rolled back.
     static void ConfirmOTAImage() {
       if(RollbackPending) {
         esp_ota_mark_app_valid_cancel_rollback();
@@ -577,9 +577,10 @@ namespace avp {
         }
         // A scan hops channels under a softAP client, so one attached defers the retry, but only
         // up to AP_MODE_ACTIVE_TO: a phone left associated must not keep the device off the LAN.
-        // An upload through the softAP is never cut off by a scan.
+        // An image on OTA probation never defers: only a join confirms it, within
+        // OTA_ConfirmTimeout_ms. An upload through the softAP is never cut off by a scan.
         if(!OTA_IsInProgress && STA_RetryTO.JustCheck() &&
-          (WiFi.softAPgetStationNum() == 0 || AP_MODE_ACTIVE_TO.JustCheck()))
+          (WiFi.softAPgetStationNum() == 0 || AP_MODE_ACTIVE_TO.JustCheck() || RollbackPending))
           AsyncStartScanNetworks();
         break;
       case Status_t::SCANNING:
